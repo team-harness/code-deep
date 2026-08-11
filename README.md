@@ -1,8 +1,12 @@
 # code-intel
 
-`code-intel` is a persistent MCP bridge for code exploration and diff-aware review. It keeps one CodeGraph MCP connection alive for the lifetime of the outer MCP server and exposes a deliberately small interface:
+`code-intel` gives coding agents two focused workflows: understand code before
+changing it, then review the resulting diff. It keeps one CodeGraph MCP
+connection alive for the lifetime of the outer MCP server and exposes a
+deliberately small interface:
 
-- `explore`: relevant source, call paths, and blast radius.
+- `explore`: find relevant source, trace callers and callees, follow data flow,
+  and understand blast radius without reading the repository broadly.
 - `review`: diff parsing, changed-symbol mapping, impact collection, explainable risk scoring, and a structured report.
 
 The npm package is `@team-harness/code-intel`. It installs CodeGraph as an exact dependency; end users do not need a separate global CodeGraph installation.
@@ -55,6 +59,26 @@ after startup.
 
 The agent sees only `explore` and `review`. Internally, the review module also uses CodeGraph's `node` and `impact` tools; they are not exposed on the outer MCP surface.
 
+## Explore code
+
+Ask a task-oriented question before reading or editing broadly:
+
+```bash
+code-intel explore \
+  "Trace how AuthService login creates and validates sessions, including callers and blast radius" \
+  --path /path/to/project
+```
+
+`explore` returns a focused set of relevant source, symbol relationships, call
+paths, and downstream impact. A useful query names the task, the symbols or
+files already known, and the relationship to trace, such as callers, callees,
+data flow, or blast radius.
+
+Use `--max-files <count>` to control the amount of source returned. The MCP
+`explore` tool accepts the same query, project path, and file limit, so agents
+can refine an investigation with targeted follow-up questions while reusing the
+same persistent CodeGraph connection.
+
 ## Review modes
 
 Review the current working tree, including staged, unstaged, and untracked files:
@@ -105,6 +129,7 @@ Agent / MCP host
 code-intel (long-lived process)
       |
       +-- CodeGraphBridge ---- persistent MCP client ---- CodeGraph MCP
+      |       +-- explore ---- focused source / call paths / blast radius
       |
       +-- ReviewAnalyzer
             +-- structured unified-diff parser
