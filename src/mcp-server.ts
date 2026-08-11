@@ -73,7 +73,7 @@ export interface CodeIntelServerOptions {
 
 export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
   const server = new Server(
-    { name: 'code-intel', version: '0.4.0' },
+    { name: 'code-intel', version: '0.4.1' },
     {
       capabilities: { tools: {} },
       instructions: 'Use explore for code discovery and review for diff-aware impact analysis. Both are read-only and backed by one persistent CodeGraph connection.',

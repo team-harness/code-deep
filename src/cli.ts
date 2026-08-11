@@ -14,7 +14,7 @@ import { collectProcessReport, renderProcessReport } from './process-report.js';
 const program = new Command()
   .name('code-intel')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version('0.4.0');
+  .version('0.4.1');
 
 program
   .command('install')

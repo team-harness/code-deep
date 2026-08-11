@@ -361,4 +361,30 @@ diff --git a/tests/value.test.ts b/tests/value.test.ts
 
     expect(report.riskSignals.map((signal) => signal.code)).not.toContain('tests-unchanged');
   });
+
+  it('does not classify protocol schema constants as sensitive symbols', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') {
+          return '- `GRAPH_ADAPTER_SCHEMA_VERSION` (constant) — :1';
+        }
+        if (name === 'codegraph_impact') {
+          return '**Impact: "GRAPH_ADAPTER_SCHEMA_VERSION" affects 1 symbol**\n\n**src/graph-adapter.ts:**\nGRAPH_ADAPTER_SCHEMA_VERSION:1';
+        }
+        return 'adapter context';
+      },
+    };
+    const diff = `diff --git a/src/graph-adapter.ts b/src/graph-adapter.ts
+--- a/src/graph-adapter.ts
++++ b/src/graph-adapter.ts
+@@ -1 +1 @@
+-export const GRAPH_ADAPTER_SCHEMA_VERSION = 0
++export const GRAPH_ADAPTER_SCHEMA_VERSION = 1
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.reviewItems[0]?.risk.reasons.map((reason) => reason.code))
+      .not.toContain('sensitive-symbol');
+  });
 });

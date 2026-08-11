@@ -577,8 +577,17 @@ function testEvidence(
 
 function isSensitiveReviewTarget(file: string, symbol = ''): boolean {
   const sensitivePath = /(?:^|[/_.-])(auth|security|permission|payment|billing|migration|schema|crypto|secret)(?:[/_.-]|$)/i;
-  const sensitiveSymbol = /(auth|login|password|token|session|crypt|secret|credential|permission|payment|billing|migration|schema|encrypt|decrypt|sign|verify)/i;
-  return sensitivePath.test(file) || sensitiveSymbol.test(symbol);
+  const sensitiveWords = new Set([
+    'auth', 'authentication', 'authorization', 'oauth', 'login', 'password',
+    'token', 'session', 'crypt', 'crypto', 'secret', 'credential', 'permission',
+    'payment', 'billing', 'encrypt', 'decrypt', 'signature', 'verify',
+  ]);
+  const symbolWords = symbol
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return sensitivePath.test(file) || symbolWords.some((word) => sensitiveWords.has(word));
 }
 
 function errorMessage(error: unknown): string {
