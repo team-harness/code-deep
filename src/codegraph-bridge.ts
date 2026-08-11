@@ -86,7 +86,7 @@ export class CodeGraphBridge {
     const params = this.serverParameters();
     const transport = new StdioClientTransport(params);
     const client = new Client(
-      { name: 'code-intel-bridge', version: '0.3.0' },
+      { name: 'code-intel-bridge', version: '0.3.1' },
       { capabilities: {} },
     );
 

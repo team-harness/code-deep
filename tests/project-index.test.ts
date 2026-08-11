@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -63,6 +63,31 @@ describe('initializeProjectIndex', () => {
     expect(output.join('')).toContain(`Refreshing code-intel index in ${projectPath}`);
     expect(output.join('')).toContain(`Refreshed code-intel index in ${projectPath}`);
     expect(output.join('')).not.toContain('codegraph sync');
+  });
+
+  it('does not inherit an index from outside the current Git repository', async () => {
+    const workspacePath = await makeProject();
+    const projectPath = join(workspacePath, 'portable-agent-team');
+    const nestedPath = join(projectPath, 'src');
+    await mkdir(join(workspacePath, '.codegraph'));
+    await mkdir(projectPath);
+    await writeFile(join(projectPath, '.git'), 'gitdir: /tmp/example-worktree\n');
+    await mkdir(nestedPath);
+    const calls: string[][] = [];
+    const output: string[] = [];
+    const run: CodeGraphCommandRunner = async (args) => {
+      calls.push(args);
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    await initializeProjectIndex(nestedPath, {
+      run,
+      write: (text) => output.push(text),
+    });
+
+    expect(calls).toEqual([['init', projectPath]]);
+    expect(output.join('')).toContain(`Initializing code-intel index in ${projectPath}`);
+    expect(output.join('')).not.toContain('Refreshing code-intel index');
   });
 
   it('rewrites backend branding and commands in failure diagnostics', async () => {

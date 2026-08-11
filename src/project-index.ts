@@ -23,8 +23,9 @@ export async function initializeProjectIndex(
   options: InitializeProjectIndexOptions = {},
 ): Promise<void> {
   const projectPath = resolve(requestedPath);
-  const existingRoot = await findIndexRoot(projectPath);
-  const targetPath = existingRoot ?? projectPath;
+  const repositoryRoot = await findRepositoryRoot(projectPath);
+  const existingRoot = await findIndexRoot(projectPath, repositoryRoot);
+  const targetPath = existingRoot ?? repositoryRoot ?? projectPath;
   const action = existingRoot ? 'Refreshing' : 'Initializing';
   const completed = existingRoot ? 'Refreshed' : 'Initialized';
   const args = existingRoot
@@ -41,11 +42,24 @@ export async function initializeProjectIndex(
   write(`${completed} code-intel index in ${targetPath}.\n`);
 }
 
-async function findIndexRoot(startPath: string): Promise<string | null> {
+async function findIndexRoot(
+  startPath: string,
+  repositoryRoot: string | null,
+): Promise<string | null> {
   let current = startPath;
   const root = parse(startPath).root;
   while (true) {
     if (await isDirectory(join(current, '.codegraph'))) return current;
+    if (current === repositoryRoot || current === root) return null;
+    current = dirname(current);
+  }
+}
+
+async function findRepositoryRoot(startPath: string): Promise<string | null> {
+  let current = startPath;
+  const root = parse(startPath).root;
+  while (true) {
+    if (await pathExists(join(current, '.git'))) return current;
     if (current === root) return null;
     current = dirname(current);
   }
@@ -54,6 +68,18 @@ async function findIndexRoot(startPath: string): Promise<string | null> {
 async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
+  } catch (error) {
+    if (isNodeError(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
   } catch (error) {
     if (isNodeError(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
       return false;
