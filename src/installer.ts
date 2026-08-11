@@ -43,13 +43,15 @@ const INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
 
 Use code-intel for code exploration and review assistance in Git repositories. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree:
 
+Prefer the code-intel MCP tools \`code-intel.explore\` and \`code-intel.review\` whenever they are available. Do not probe or invoke the shell CLI before using an available MCP tool. Refer to the capability, server, and tools as \`code-intel\` in user-facing messages. CodeGraph is an internal backend. Do not describe a fallback as switching to CodeGraph.
+
 1. Before broad reading or editing, call \`explore\` with the absolute Git root as \`projectPath\`. Make \`query\` state the task goal, relevant symbols or files, and the relationship to trace (callers, callees, data flow, or blast radius).
 2. After changes, call \`review\` with the same \`projectPath\`. Omit \`base\`/\`head\` for the current working tree; provide both for a branch or pull-request range; use \`diff\` only for a caller-supplied patch.
 3. Process \`reviewItems\` in descending risk order. Test status is \`linked\`, \`changed\`, \`missing\`, or \`unknown\`; risk prioritizes attention and does not prove a bug.
 4. When \`filesOmitted\` or \`symbolsOmitted\` is nonzero, confidence is low, or warnings are present, run a targeted \`explore\` for the affected symbol or path.
 5. Before emitting a review comment, verify a concrete failure path against the diff and focused source context.
 
-Shell fallback: use \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-intel\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
+Shell fallback, only when the code-intel MCP tools are unavailable: use \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-intel\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
 
 Do not ask the user to initialize new worktrees. Use \`code-intel init\` only for an explicit manual refresh or to diagnose an initialization failure.
 ${INSTRUCTIONS_END}`;

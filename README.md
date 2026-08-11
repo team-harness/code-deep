@@ -51,7 +51,7 @@ diagnose initialization failure.
       "command": "npx",
       "args": [
         "-y",
-        "@team-harness/code-intel@1.5.4",
+        "@team-harness/code-intel@1.5.5",
         "mcp",
         "--path",
         "/absolute/path/to/project"
@@ -65,6 +65,13 @@ The agent sees only `explore` and `review`. Both leave source files unchanged,
 but may create `.codegraph/` on first use, so their MCP annotations do not claim
 strict read-only behavior. Internally, the review module also uses CodeGraph's
 `node` and `impact` tools; they are not exposed on the outer MCP surface.
+
+## Agent behavior
+
+When the code-intel MCP tools are available, agents must call them directly and
+must not probe the shell CLI first. Shell commands are fallback-only. User-facing
+messages refer to the capability, server, and tools as `code-intel`; CodeGraph is
+the internal backend name, not a separate tool to switch to.
 
 ## Explore code
 
@@ -83,7 +90,7 @@ data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
 `code-intel` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-intel@1.5.4`.
+command through `npx -y @team-harness/code-intel@1.5.5`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents

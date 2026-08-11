@@ -30,6 +30,13 @@ describe('code-intel MCP server', () => {
     clients.push(client);
     await client.connect(clientTransport);
 
+    const instructions = client.getInstructions();
+    expect(instructions).toContain('Prefer these code-intel MCP tools over shell commands');
+    expect(instructions).toContain('Do not probe the code-intel CLI when MCP tools are available');
+    expect(instructions).toContain('Refer to this capability as code-intel');
+    expect(instructions).toContain('Do not tell the user you are switching to CodeGraph');
+    expect(instructions).not.toContain('share one persistent CodeGraph connection');
+
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual(['explore', 'review']);
     expect(tools.tools[0]?.description).toContain('task goal');

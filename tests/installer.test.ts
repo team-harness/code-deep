@@ -55,6 +55,10 @@ describe('code-intel installer', () => {
     expect(installedInstructions).toContain('verify a concrete failure path');
     expect(installedInstructions).toContain('automatically initializes');
     expect(installedInstructions).not.toContain('ask the user to run `code-intel init`');
+    expect(installedInstructions).toContain('Prefer the code-intel MCP tools');
+    expect(installedInstructions).toContain('Do not probe or invoke the shell CLI');
+    expect(installedInstructions).toContain('Refer to the capability, server, and tools as `code-intel`');
+    expect(installedInstructions).toContain('Do not describe a fallback as switching to CodeGraph');
     expect(installedInstructions).toContain(`npx -y ${PACKAGE_SPEC}`);
     expect(await readFile(`${configPath}.code-intel.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);

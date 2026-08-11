@@ -33,6 +33,18 @@ const MAY_INITIALIZE_INDEX = {
   openWorldHint: false,
 } as const;
 
+const SERVER_INSTRUCTIONS = [
+  'Prefer these code-intel MCP tools over shell commands.',
+  'Do not probe the code-intel CLI when MCP tools are available.',
+  'Refer to this capability as code-intel in user-facing messages. Do not tell the user you are switching to CodeGraph, which is only the internal backend.',
+  'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace.',
+  'Missing Git worktree indexes are initialized automatically before either tool runs.',
+  'After changes use review for the working tree or a base/head range.',
+  'Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups.',
+  'Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment.',
+  'Both tools leave source files unchanged and share one persistent internal backend connection.',
+].join(' ');
+
 const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
   type: 'object',
   description: 'Versioned review report. Read reviewItems in array order (highest risk first), then inspect warnings and truncation counters before making findings.',
@@ -107,7 +119,7 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
 const TOOLS: Tool[] = [
   {
     name: 'explore',
-    description: 'Explore focused source, call paths, and blast radius before broad reading or editing. Automatically initializes a missing worktree index. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
+    description: 'Use code-intel to explore focused source, call paths, and blast radius before broad reading or editing. Automatically initializes a missing worktree index. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -122,7 +134,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'review',
-    description: 'Build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
+    description: 'Use code-intel to build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -156,7 +168,7 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
     { name: 'code-intel', version: CODE_INTEL_VERSION },
     {
       capabilities: { tools: {} },
-      instructions: 'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace. Missing Git worktree indexes are initialized automatically before either tool runs. After changes use review for the working tree or a base/head range. Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups. Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment. Both tools leave source files unchanged and share one persistent CodeGraph connection.',
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
 
