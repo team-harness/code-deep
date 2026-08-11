@@ -1,6 +1,6 @@
 {
   "name": "@team-harness/code-intel",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "Persistent MCP code intelligence and review bridge powered by CodeGraph",
   "type": "module",
   "license": "MIT",

@@ -31,6 +31,10 @@ and Claude `~/.claude/CLAUDE.md`, directing both agents to use `explore` for
 code discovery and `review` before finalizing changes. Claude receives the
 `mcp__code-intel__*` permission in `~/.claude/settings.json`.
 
+The generated MCP configuration pins the currently installed code-intel version.
+Run `code-intel install` again after upgrading the npm package so agents use the
+same reviewed version as the global CLI.
+
 The installer preserves unrelated configuration, backs up each changed existing
 file as `<file>.code-intel.bak`, and is idempotent. It does not initialize any
 repository. Run `code-intel init` inside each project to create its local index;
@@ -47,7 +51,7 @@ after startup.
       "command": "npx",
       "args": [
         "-y",
-        "@team-harness/code-intel",
+        "@team-harness/code-intel@1.5.3",
         "mcp",
         "--path",
         "/absolute/path/to/project"
@@ -73,6 +77,10 @@ code-intel explore \
 paths, and downstream impact. A useful query names the task, the symbols or
 files already known, and the relationship to trace, such as callers, callees,
 data flow, or blast radius.
+
+Agents should prefer the MCP tool. When shell fallback is necessary and a global
+`code-intel` command is not visible in the current process's `PATH`, run the same
+command through `npx -y @team-harness/code-intel@1.5.3`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents

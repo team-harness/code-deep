@@ -9,6 +9,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
+import { CODE_INTEL_VERSION } from './version.js';
 
 export type InstallTarget = 'codex' | 'claude';
 export type InstallAction = 'created' | 'updated' | 'unchanged';
@@ -28,10 +29,11 @@ export interface InstallCodeIntelOptions {
   targets: InstallTarget[];
 }
 
+const PACKAGE_SPEC = `@team-harness/code-intel@${CODE_INTEL_VERSION}`;
 const MCP_ENTRY = {
   type: 'stdio',
   command: 'npx',
-  args: ['-y', '@team-harness/code-intel', 'mcp'],
+  args: ['-y', PACKAGE_SPEC, 'mcp'],
 };
 
 const INSTRUCTIONS_START = '<!-- CODE_INTEL_START -->';
@@ -47,7 +49,7 @@ In repositories with a \`.codegraph/\` directory, use code-intel for code explor
 4. When \`filesOmitted\` or \`symbolsOmitted\` is nonzero, confidence is low, or warnings are present, run a targeted \`explore\` for the affected symbol or path.
 5. Before emitting a review comment, verify a concrete failure path against the diff and focused source context.
 
-Shell fallback: \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`.
+Shell fallback: use \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-intel\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
 
 If \`.codegraph/\` is missing, ask the user to run \`code-intel init\`; do not create an index implicitly.
 ${INSTRUCTIONS_END}`;
@@ -89,7 +91,7 @@ async function installCodex(homeDir: string): Promise<InstallFileResult[]> {
   const block = [
     '[mcp_servers.code-intel]',
     'command = "npx"',
-    'args = ["-y", "@team-harness/code-intel", "mcp"]',
+    `args = ["-y", "${PACKAGE_SPEC}", "mcp"]`,
   ].join('\n');
 
   return [

@@ -6,6 +6,9 @@ import {
   installCodeIntel,
   parseInstallTargets,
 } from '../src/installer.js';
+import { CODE_INTEL_VERSION } from '../src/version.js';
+
+const PACKAGE_SPEC = `@team-harness/code-intel@${CODE_INTEL_VERSION}`;
 
 describe('code-intel installer', () => {
   const homes: string[] = [];
@@ -41,7 +44,7 @@ describe('code-intel installer', () => {
 
     expect(installedConfig).toContain(originalConfig.trimEnd());
     expect(installedConfig).toContain('[mcp_servers.code-intel]\ncommand = "npx"');
-    expect(installedConfig).toContain('args = ["-y", "@team-harness/code-intel", "mcp"]');
+    expect(installedConfig).toContain(`args = ["-y", "${PACKAGE_SPEC}", "mcp"]`);
     expect(installedInstructions).toContain('<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->');
     expect(installedInstructions).toContain('<!-- CODE_INTEL_START -->');
     expect(installedInstructions).toContain('absolute Git root as `projectPath`');
@@ -50,6 +53,7 @@ describe('code-intel installer', () => {
     expect(installedInstructions).toContain('`linked`, `changed`, `missing`, or `unknown`');
     expect(installedInstructions).toContain('run a targeted `explore`');
     expect(installedInstructions).toContain('verify a concrete failure path');
+    expect(installedInstructions).toContain(`npx -y ${PACKAGE_SPEC}`);
     expect(await readFile(`${configPath}.code-intel.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);
 
@@ -81,6 +85,7 @@ describe('code-intel installer', () => {
     const installed = await readFile(configPath, 'utf8');
     expect(installed.match(/\[mcp_servers\.(?:code-intel|"code-intel")\]/g)).toHaveLength(1);
     expect(installed).toContain('[mcp_servers.code-intel]\ncommand = "npx"');
+    expect(installed).toContain(`args = ["-y", "${PACKAGE_SPEC}", "mcp"]`);
     expect(installed).toContain('[mcp_servers.existing]\ncommand = "existing"');
   });
 
@@ -142,7 +147,7 @@ describe('code-intel installer', () => {
     expect(mcp.mcpServers['code-intel']).toEqual({
       type: 'stdio',
       command: 'npx',
-      args: ['-y', '@team-harness/code-intel', 'mcp'],
+      args: ['-y', PACKAGE_SPEC, 'mcp'],
     });
     expect(settings.permissions.allow).toEqual(['Bash(git status:*)', 'mcp__code-intel__*']);
     expect(instructions).toContain('<!-- CODE_INTEL_START -->');
