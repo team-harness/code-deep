@@ -11,11 +11,22 @@ The npm package is `@team-harness/code-intel`. It installs CodeGraph as an exact
 
 ```bash
 npm install -g @team-harness/code-intel
+code-intel install --target codex,claude
 cd /path/to/project
 code-intel init
 ```
 
-`init` creates the project's local `.codegraph/` index. The MCP process keeps the connection warm and CodeGraph watches indexed source changes after startup.
+`install` registers the `code-intel` MCP server globally for the selected agents.
+It also adds a marker-delimited guidance block to Codex `~/.codex/AGENTS.md`
+and Claude `~/.claude/CLAUDE.md`, directing both agents to use `explore` for
+code discovery and `review` before finalizing changes. Claude receives the
+`mcp__code-intel__*` permission in `~/.claude/settings.json`.
+
+The installer preserves unrelated configuration, backs up each changed existing
+file as `<file>.code-intel.bak`, and is idempotent. It does not initialize any
+repository. Run `code-intel init` inside each project to create its local
+`.codegraph/` index. The MCP process keeps the connection warm and CodeGraph
+watches indexed source changes after startup.
 
 ## MCP configuration
 
@@ -90,21 +101,20 @@ Changed hunks are mapped to the nearest preceding symbol in the current CodeGrap
 ## Library use
 
 ```ts
-import { CodeGraphBridge, ReviewAnalyzer } from '@team-harness/code-intel';
+import { CodeIntelClient } from '@team-harness/code-intel';
 
-const bridge = new CodeGraphBridge({ projectPath: process.cwd() });
+const codeIntel = new CodeIntelClient({ projectPath: process.cwd() });
 try {
-  const context = await bridge.callText('codegraph_explore', {
-    query: 'AuthService login',
-    projectPath: process.cwd(),
-  });
-  const report = await new ReviewAnalyzer(bridge).analyze({
-    projectPath: process.cwd(),
-  });
+  const context = await codeIntel.explore('AuthService login');
+  const report = await codeIntel.review();
 } finally {
-  await bridge.close();
+  await codeIntel.close();
 }
 ```
+
+`CodeIntelClient` is the public library boundary. Its `explore()` and `review()`
+methods share one persistent CodeGraph connection; the bridge and analyzer are
+internal implementation details.
 
 ## Development
 

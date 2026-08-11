@@ -1,17 +1,34 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command } from 'commander';
+import { CodeIntelClient } from './client.js';
 import { CodeGraphBridge, resolveCodeGraphBin } from './codegraph-bridge.js';
+import { installCodeIntel, parseInstallTargets } from './installer.js';
 import { createCodeIntelServer } from './mcp-server.js';
-import { ReviewAnalyzer } from './review.js';
 
 const program = new Command()
   .name('code-intel')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version('0.1.0');
+  .version('0.2.0');
+
+program
+  .command('install')
+  .description('Install code-intel MCP and agent instructions')
+  .requiredOption('--target <targets>', 'Comma-separated targets: codex,claude')
+  .action(async (options: { target: string }) => {
+    const result = await installCodeIntel({
+      homeDir: homedir(),
+      targets: parseInstallTargets(options.target),
+    });
+    for (const file of result.files) {
+      process.stdout.write(`${file.action.padEnd(9)} ${file.path}\n`);
+      if (file.backupPath) process.stdout.write(`backup    ${file.backupPath}\n`);
+    }
+  });
 
 program
   .command('mcp')
@@ -47,16 +64,12 @@ program
   .option('--max-files <count>', 'Maximum source files', parsePositiveInteger, 12)
   .action(async (query: string[], options: { path: string; maxFiles: number }) => {
     const projectPath = resolve(options.path);
-    const bridge = new CodeGraphBridge({ projectPath });
+    const client = new CodeIntelClient({ projectPath });
     try {
-      const text = await bridge.callText('codegraph_explore', {
-        query: query.join(' '),
-        maxFiles: options.maxFiles,
-        projectPath,
-      });
+      const text = await client.explore(query.join(' '), { maxFiles: options.maxFiles });
       process.stdout.write(`${text}\n`);
     } finally {
-      await bridge.close();
+      await client.close();
     }
   });
 
@@ -71,10 +84,9 @@ program
     options: { base?: string; head?: string; json?: boolean },
   ) => {
     const projectPath = resolve(path);
-    const bridge = new CodeGraphBridge({ projectPath });
+    const client = new CodeIntelClient({ projectPath });
     try {
-      const report = await new ReviewAnalyzer(bridge).analyze({
-        projectPath,
+      const report = await client.review({
         base: options.base,
         head: options.head,
       });
@@ -82,7 +94,7 @@ program
         ? `${JSON.stringify(report, null, 2)}\n`
         : `${report.markdown}\n`);
     } finally {
-      await bridge.close();
+      await client.close();
     }
   });
 
