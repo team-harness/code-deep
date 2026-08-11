@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command } from 'commander';
 import { CodeIntelClient } from './client.js';
-import { CodeGraphBridge, resolveCodeGraphBin } from './codegraph-bridge.js';
+import { CodeGraphBridge } from './codegraph-bridge.js';
 import { installCodeIntel, parseInstallTargets } from './installer.js';
 import { createCodeIntelServer } from './mcp-server.js';
+import { initializeProjectIndex } from './project-index.js';
 
 const program = new Command()
   .name('code-intel')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version('0.2.0');
+  .version('0.2.1');
 
 program
   .command('install')
@@ -52,9 +52,9 @@ program
 
 program
   .command('init [path]')
-  .description('Initialize or refresh the CodeGraph index for a project')
+  .description('Initialize or refresh the code-intel index for a project')
   .action(async (path = process.cwd()) => {
-    await runCodeGraph(['init', resolve(path)]);
+    await initializeProjectIndex(path);
   });
 
 program
@@ -104,21 +104,6 @@ function parsePositiveInteger(value: string): number {
     throw new Error(`Expected a positive integer, received: ${value}`);
   }
   return parsed;
-}
-
-async function runCodeGraph(args: string[]): Promise<void> {
-  const child = spawn(process.execPath, [resolveCodeGraphBin(), ...args], {
-    stdio: 'inherit',
-    env: process.env,
-  });
-  const exitCode = await new Promise<number>((resolveExit, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (signal) reject(new Error(`CodeGraph exited from signal ${signal}`));
-      else resolveExit(code ?? 1);
-    });
-  });
-  if (exitCode !== 0) throw new Error(`CodeGraph exited with code ${exitCode}`);
 }
 
 program.parseAsync(process.argv).catch((error: unknown) => {

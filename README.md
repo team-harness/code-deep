@@ -24,9 +24,10 @@ code discovery and `review` before finalizing changes. Claude receives the
 
 The installer preserves unrelated configuration, backs up each changed existing
 file as `<file>.code-intel.bak`, and is idempotent. It does not initialize any
-repository. Run `code-intel init` inside each project to create its local
-`.codegraph/` index. The MCP process keeps the connection warm and CodeGraph
-watches indexed source changes after startup.
+repository. Run `code-intel init` inside each project to create its local index;
+run the same command again to incrementally refresh an existing index. The MCP
+process keeps the connection warm and CodeGraph watches indexed source changes
+after startup.
 
 ## MCP configuration
 
