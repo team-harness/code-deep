@@ -1,0 +1,51 @@
+{
+  "name": "@team-harness/code-intel",
+  "version": "0.1.0",
+  "description": "Persistent MCP code intelligence and review bridge powered by CodeGraph",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/team-harness/code-intel.git"
+  },
+  "bin": {
+    "code-intel": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0 <25.0.0"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@colbymchenry/codegraph": "1.5.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "commander": "14.0.2",
+    "parse-diff": "0.12.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
