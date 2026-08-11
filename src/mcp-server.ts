@@ -8,6 +8,7 @@ import {
 import { z } from 'zod';
 import type { GraphReader, ReviewReport } from './review.js';
 import { ReviewAnalyzer } from './review.js';
+import { CODE_INTEL_VERSION } from './version.js';
 
 const ExploreInput = z.object({
   query: z.string().min(1),
@@ -73,7 +74,7 @@ export interface CodeIntelServerOptions {
 
 export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
   const server = new Server(
-    { name: 'code-intel', version: '0.4.1' },
+    { name: 'code-intel', version: CODE_INTEL_VERSION },
     {
       capabilities: { tools: {} },
       instructions: 'Use explore for code discovery and review for diff-aware impact analysis. Both are read-only and backed by one persistent CodeGraph connection.',

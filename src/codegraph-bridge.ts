@@ -10,6 +10,7 @@ import {
   CallToolResultSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { CODE_INTEL_VERSION } from './version.js';
 
 const require = createRequire(import.meta.url);
 
@@ -86,7 +87,7 @@ export class CodeGraphBridge {
     const params = this.serverParameters();
     const transport = new StdioClientTransport(params);
     const client = new Client(
-      { name: 'code-intel-bridge', version: '0.4.1' },
+      { name: 'code-intel-bridge', version: CODE_INTEL_VERSION },
       { capabilities: {} },
     );
 

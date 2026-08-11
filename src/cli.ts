@@ -10,11 +10,12 @@ import { installCodeIntel, parseInstallTargets } from './installer.js';
 import { createCodeIntelServer } from './mcp-server.js';
 import { initializeProjectIndex } from './project-index.js';
 import { collectProcessReport, renderProcessReport } from './process-report.js';
+import { CODE_INTEL_VERSION } from './version.js';
 
 const program = new Command()
   .name('code-intel')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version('0.4.1');
+  .version(CODE_INTEL_VERSION);
 
 program
   .command('install')

@@ -7,6 +7,10 @@
 
 The npm package is `@team-harness/code-intel`. It installs CodeGraph as an exact dependency; end users do not need a separate global CodeGraph installation.
 
+`code-intel` follows the bundled CodeGraph version. For example, a package that
+depends on `@colbymchenry/codegraph@1.5.0` is released as `code-intel@1.5.0`.
+The build fails its version-policy test if those versions diverge.
+
 ## Install
 
 ```bash
