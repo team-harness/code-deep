@@ -10,6 +10,26 @@ const fixture = fileURLToPath(
 );
 
 describe('CodeGraphBridge', () => {
+  it('ensures the requested worktree index before connecting to CodeGraph', async () => {
+    const ensured: string[] = [];
+    const bridge = new CodeGraphBridge({
+      projectPath: process.cwd(),
+      command: process.execPath,
+      args: [fixture],
+      ensureIndex: async (projectPath) => { ensured.push(projectPath); },
+    });
+
+    try {
+      await bridge.callText('codegraph_explore', {
+        query: 'feature worktree',
+        projectPath: '/worktrees/feature-a',
+      });
+      expect(ensured).toEqual(['/worktrees/feature-a']);
+    } finally {
+      await bridge.close();
+    }
+  });
+
   it('reuses one MCP child process across calls', async () => {
     const bridge = new CodeGraphBridge({
       projectPath: process.cwd(),

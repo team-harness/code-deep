@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   StdioClientTransport,
@@ -10,15 +7,17 @@ import {
   CallToolResultSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { resolveCodeGraphBin } from './codegraph-bin.js';
+import { ensureProjectIndex } from './project-index.js';
 import { CODE_INTEL_VERSION } from './version.js';
-
-const require = createRequire(import.meta.url);
 
 export interface CodeGraphBridgeOptions {
   projectPath: string;
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  autoInit?: boolean;
+  ensureIndex?: (projectPath: string) => Promise<void>;
 }
 
 export class CodeGraphBridge {
@@ -26,6 +25,7 @@ export class CodeGraphBridge {
   private transport: StdioClientTransport | null = null;
   private connecting: Promise<Client> | null = null;
   private closed = false;
+  private readonly ensuredProjects = new Set<string>();
 
   constructor(private readonly options: CodeGraphBridgeOptions) {}
 
@@ -33,6 +33,7 @@ export class CodeGraphBridge {
     name: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    await this.ensureProjectIndex(projectPathFromArgs(args, this.options.projectPath));
     const firstClient = await this.getClient();
     try {
       return await this.callWithClient(firstClient, name, args);
@@ -42,6 +43,12 @@ export class CodeGraphBridge {
       const replacement = await this.getClient();
       return this.callWithClient(replacement, name, args);
     }
+  }
+
+  async ensureProjectIndex(projectPath = this.options.projectPath): Promise<void> {
+    if (this.options.autoInit === false || this.ensuredProjects.has(projectPath)) return;
+    await (this.options.ensureIndex ?? ensureProjectIndex)(projectPath);
+    this.ensuredProjects.add(projectPath);
   }
 
   async callText(name: string, args: Record<string, unknown>): Promise<string> {
@@ -175,6 +182,12 @@ export class CodeGraphBridge {
   }
 }
 
+function projectPathFromArgs(args: Record<string, unknown>, fallback: string): string {
+  return typeof args.projectPath === 'string' && args.projectPath.length > 0
+    ? args.projectPath
+    : fallback;
+}
+
 function isConnectionClosed(error: unknown): boolean {
   return error instanceof Error && /connection (?:is )?closed|not connected/i.test(error.message);
 }
@@ -184,16 +197,4 @@ export function textFromToolResult(result: CallToolResult): string {
     .filter((item): item is Extract<typeof item, { type: 'text' }> => item.type === 'text')
     .map((item) => item.text)
     .join('\n');
-}
-
-export function resolveCodeGraphBin(): string {
-  const packageJsonPath = require.resolve('@colbymchenry/codegraph/package.json');
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
-    bin?: string | Record<string, string>;
-  };
-  const bin = typeof packageJson.bin === 'string'
-    ? packageJson.bin
-    : packageJson.bin?.codegraph;
-  if (!bin) throw new Error('The installed CodeGraph package does not expose a codegraph bin');
-  return join(dirname(packageJsonPath), bin);
 }

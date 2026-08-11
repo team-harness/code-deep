@@ -18,7 +18,12 @@ describe('code-intel MCP server', () => {
         return 'explored source';
       },
     };
-    const server = createCodeIntelServer({ projectPath: '/repo', bridge });
+    const ensured: string[] = [];
+    const server = createCodeIntelServer({
+      projectPath: '/repo',
+      bridge,
+      ensureIndex: async (projectPath) => { ensured.push(projectPath); },
+    });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     const client = new Client({ name: 'test', version: '1.0.0' });
@@ -28,9 +33,12 @@ describe('code-intel MCP server', () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual(['explore', 'review']);
     expect(tools.tools[0]?.description).toContain('task goal');
+    expect(tools.tools[0]?.description).toContain('Automatically initializes');
+    expect(tools.tools[0]?.annotations?.readOnlyHint).toBe(false);
     expect(tools.tools[0]?.inputSchema.properties?.projectPath?.description)
       .toContain('absolute Git root');
     expect(tools.tools[1]?.description).toContain('descending risk order');
+    expect(tools.tools[1]?.annotations?.readOnlyHint).toBe(false);
     expect(tools.tools[1]?.outputSchema).toMatchObject({
       type: 'object',
       required: expect.arrayContaining([
@@ -54,6 +62,7 @@ describe('code-intel MCP server', () => {
         },
       },
     ]);
+    expect(ensured).toEqual(['/repo']);
   });
 
   it('returns versioned review items through MCP structured content', async () => {
@@ -74,7 +83,11 @@ describe('code-intel MCP server', () => {
         return 'login context';
       },
     };
-    const server = createCodeIntelServer({ projectPath: '/repo', bridge });
+    const server = createCodeIntelServer({
+      projectPath: '/repo',
+      bridge,
+      ensureIndex: async () => {},
+    });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     const client = new Client({ name: 'test', version: '1.0.0' });
@@ -117,13 +130,18 @@ describe('code-intel MCP server', () => {
 
   it('rejects a caller-supplied diff combined with a Git range', async () => {
     const calls: string[] = [];
+    const ensured: string[] = [];
     const bridge = {
       async callText(name: string): Promise<string> {
         calls.push(name);
         return '';
       },
     };
-    const server = createCodeIntelServer({ projectPath: '/repo', bridge });
+    const server = createCodeIntelServer({
+      projectPath: '/repo',
+      bridge,
+      ensureIndex: async (projectPath) => { ensured.push(projectPath); },
+    });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     const client = new Client({ name: 'test', version: '1.0.0' });
@@ -145,5 +163,6 @@ describe('code-intel MCP server', () => {
       text: expect.stringContaining('diff cannot be combined with base or head'),
     }));
     expect(calls).toEqual([]);
+    expect(ensured).toEqual([]);
   });
 });

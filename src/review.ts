@@ -752,7 +752,7 @@ async function loadCodeGraphExtensionOverrides(projectPath: string): Promise<Set
   }
 }
 
-function validateReviewRequest(request: ReviewRequest): void {
+export function validateReviewRequest(request: ReviewRequest): void {
   if (request.base !== undefined && !request.base.trim()) {
     throw new Error('base must not be empty');
   }

@@ -53,6 +53,8 @@ describe('code-intel installer', () => {
     expect(installedInstructions).toContain('`linked`, `changed`, `missing`, or `unknown`');
     expect(installedInstructions).toContain('run a targeted `explore`');
     expect(installedInstructions).toContain('verify a concrete failure path');
+    expect(installedInstructions).toContain('automatically initializes');
+    expect(installedInstructions).not.toContain('ask the user to run `code-intel init`');
     expect(installedInstructions).toContain(`npx -y ${PACKAGE_SPEC}`);
     expect(await readFile(`${configPath}.code-intel.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);

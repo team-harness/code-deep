@@ -14,6 +14,6 @@ describe('version policy', () => {
     expect(packageJson.dependencies['@colbymchenry/codegraph']).toBe('1.5.0');
     expect(CODE_INTEL_VERSION).toBe(packageJson.version);
     expect(CODEGRAPH_VERSION).toBe(packageJson.dependencies['@colbymchenry/codegraph']);
-    expect(packageJson.version).toBe('1.5.3');
+    expect(packageJson.version).toBe('1.5.4');
   });
 });

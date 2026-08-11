@@ -21,8 +21,6 @@ bridge and reviewer to ship fixes without waiting for a new upstream release.
 ```bash
 npm install -g @team-harness/code-intel
 code-intel install --target codex,claude
-cd /path/to/project
-code-intel init
 ```
 
 `install` registers the `code-intel` MCP server globally for the selected agents.
@@ -36,11 +34,13 @@ Run `code-intel install` again after upgrading the npm package so agents use the
 same reviewed version as the global CLI.
 
 The installer preserves unrelated configuration, backs up each changed existing
-file as `<file>.code-intel.bak`, and is idempotent. It does not initialize any
-repository. Run `code-intel init` inside each project to create its local index;
-run the same command again to incrementally refresh an existing index. The MCP
-process keeps the connection warm and CodeGraph watches indexed source changes
-after startup.
+file as `<file>.code-intel.bak`, and is idempotent. It does not initialize a
+repository during installation. The first `explore` or `review` call in a Git
+repository automatically initializes a missing `.codegraph/` at that repository
+or worktree root. Concurrent first calls in one process share the same
+initialization. Existing indexes are left to CodeGraph's connect-time catch-up
+and file watcher; use `code-intel init` only for an explicit refresh or to
+diagnose initialization failure.
 
 ## MCP configuration
 
@@ -51,7 +51,7 @@ after startup.
       "command": "npx",
       "args": [
         "-y",
-        "@team-harness/code-intel@1.5.3",
+        "@team-harness/code-intel@1.5.4",
         "mcp",
         "--path",
         "/absolute/path/to/project"
@@ -61,7 +61,10 @@ after startup.
 }
 ```
 
-The agent sees only `explore` and `review`. Internally, the review module also uses CodeGraph's `node` and `impact` tools; they are not exposed on the outer MCP surface.
+The agent sees only `explore` and `review`. Both leave source files unchanged,
+but may create `.codegraph/` on first use, so their MCP annotations do not claim
+strict read-only behavior. Internally, the review module also uses CodeGraph's
+`node` and `impact` tools; they are not exposed on the outer MCP surface.
 
 ## Explore code
 
@@ -80,7 +83,7 @@ data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
 `code-intel` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-intel@1.5.3`.
+command through `npx -y @team-harness/code-intel@1.5.4`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents
@@ -147,7 +150,10 @@ code-intel (long-lived process)
             +-- Markdown + structured JSON report
 ```
 
-The bridge lazily starts CodeGraph on the first tool call, reuses that connection for later calls, and reconnects once if the child exits during a read-only request. CodeGraph may additionally share its own per-project daemon across MCP clients.
+The bridge ensures the requested Git repository or worktree index, lazily starts
+CodeGraph on the first tool call, reuses that connection for later calls, and
+reconnects once if the child exits during a tool request. CodeGraph may
+additionally share its own per-project daemon across MCP clients.
 
 ## Review semantics
 
@@ -192,7 +198,8 @@ try {
 
 `CodeIntelClient` is the public library boundary. Its `explore()` and `review()`
 methods share one persistent CodeGraph connection; the bridge and analyzer are
-internal implementation details.
+internal implementation details. Automatic initialization is enabled by default;
+library consumers that manage indexes separately can pass `autoInit: false`.
 
 ## Development
 

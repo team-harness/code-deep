@@ -59,4 +59,21 @@ describe('CodeIntelClient', () => {
     expect(exports.CodeGraphBridge).toBeUndefined();
     expect(exports.ReviewAnalyzer).toBeUndefined();
   });
+
+  it('validates review mode before attempting automatic initialization', async () => {
+    const client = new CodeIntelClient({
+      projectPath: '/not-a-git-repository',
+      command: process.execPath,
+      args: [fixture],
+    });
+
+    try {
+      await expect(client.review({
+        diff: 'diff --git a/a.ts b/a.ts',
+        base: 'main',
+      })).rejects.toThrow('diff cannot be combined with base or head');
+    } finally {
+      await client.close();
+    }
+  });
 });

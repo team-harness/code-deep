@@ -41,7 +41,7 @@ const INSTRUCTIONS_END = '<!-- CODE_INTEL_END -->';
 const INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
 ## code-intel
 
-In repositories with a \`.codegraph/\` directory, use code-intel for code exploration and review assistance:
+Use code-intel for code exploration and review assistance in Git repositories. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree:
 
 1. Before broad reading or editing, call \`explore\` with the absolute Git root as \`projectPath\`. Make \`query\` state the task goal, relevant symbols or files, and the relationship to trace (callers, callees, data flow, or blast radius).
 2. After changes, call \`review\` with the same \`projectPath\`. Omit \`base\`/\`head\` for the current working tree; provide both for a branch or pull-request range; use \`diff\` only for a caller-supplied patch.
@@ -51,7 +51,7 @@ In repositories with a \`.codegraph/\` directory, use code-intel for code explor
 
 Shell fallback: use \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-intel\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
 
-If \`.codegraph/\` is missing, ask the user to run \`code-intel init\`; do not create an index implicitly.
+Do not ask the user to initialize new worktrees. Use \`code-intel init\` only for an explicit manual refresh or to diagnose an initialization failure.
 ${INSTRUCTIONS_END}`;
 
 export function parseInstallTargets(value: string): InstallTarget[] {

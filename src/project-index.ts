@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { dirname, join, parse, resolve } from 'node:path';
-import { resolveCodeGraphBin } from './codegraph-bridge.js';
+import { resolveCodeGraphBin } from './codegraph-bin.js';
 
 export interface CodeGraphCommandResult {
   exitCode: number;
@@ -16,6 +16,50 @@ export type CodeGraphCommandRunner = (
 export interface InitializeProjectIndexOptions {
   run?: CodeGraphCommandRunner;
   write?: (text: string) => void;
+}
+
+const pendingInitializations = new Map<string, Promise<void>>();
+
+export async function ensureProjectIndex(
+  requestedPath: string,
+  options: Pick<InitializeProjectIndexOptions, 'run'> = {},
+): Promise<void> {
+  const projectPath = resolve(requestedPath);
+  const repositoryRoot = await findRepositoryRoot(projectPath);
+  const existingRoot = await findIndexRoot(projectPath, repositoryRoot);
+  if (existingRoot) return;
+  if (!repositoryRoot) {
+    throw new Error(`Automatic code-intel initialization requires a Git repository: ${projectPath}`);
+  }
+
+  const pending = pendingInitializations.get(repositoryRoot);
+  if (pending) return pending;
+
+  const initialization = initializeProjectIndex(repositoryRoot, {
+    ...options,
+    write: () => {},
+  }).then(async () => {
+    if (!await isDirectory(join(repositoryRoot, '.codegraph'))) {
+      throw new Error(`code-intel initialization completed without creating ${join(repositoryRoot, '.codegraph')}`);
+    }
+  }).catch(async (error: unknown) => {
+    // Another process may have created the directory; a successful sync proves
+    // that its index is usable instead of hiding a partial initialization.
+    if (await isDirectory(join(repositoryRoot, '.codegraph'))) {
+      await initializeProjectIndex(repositoryRoot, {
+        ...options,
+        write: () => {},
+      });
+      return;
+    }
+    throw error;
+  }).finally(() => {
+    if (pendingInitializations.get(repositoryRoot) === initialization) {
+      pendingInitializations.delete(repositoryRoot);
+    }
+  });
+  pendingInitializations.set(repositoryRoot, initialization);
+  return initialization;
 }
 
 export async function initializeProjectIndex(

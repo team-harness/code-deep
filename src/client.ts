@@ -1,6 +1,7 @@
 import { CodeGraphBridge } from './codegraph-bridge.js';
 import {
   ReviewAnalyzer,
+  validateReviewRequest,
   type ReviewReport,
   type ReviewRequest,
 } from './review.js';
@@ -10,6 +11,7 @@ export interface CodeIntelClientOptions {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  autoInit?: boolean;
 }
 
 export interface ExploreOptions {
@@ -37,10 +39,13 @@ export class CodeIntelClient {
   }
 
   async review(options: CodeIntelReviewOptions = {}): Promise<ReviewReport> {
-    return this.analyzer.analyze({
+    const request = {
       ...options,
       projectPath: this.options.projectPath,
-    });
+    };
+    validateReviewRequest(request);
+    await this.bridge.ensureProjectIndex(this.options.projectPath);
+    return this.analyzer.analyze(request);
   }
 
   async close(): Promise<void> {

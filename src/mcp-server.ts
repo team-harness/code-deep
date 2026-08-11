@@ -7,7 +7,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { GraphReader, ReviewReport } from './review.js';
-import { ReviewAnalyzer } from './review.js';
+import { ReviewAnalyzer, validateReviewRequest } from './review.js';
+import { ensureProjectIndex } from './project-index.js';
 import { CODE_INTEL_VERSION } from './version.js';
 
 const ExploreInput = z.object({
@@ -25,8 +26,8 @@ const ReviewInput = z.object({
   maxSymbols: z.number().int().min(1).max(50).optional(),
 });
 
-const READ_ONLY = {
-  readOnlyHint: true,
+const MAY_INITIALIZE_INDEX = {
+  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
@@ -106,7 +107,7 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
 const TOOLS: Tool[] = [
   {
     name: 'explore',
-    description: 'Explore focused source, call paths, and blast radius before broad reading or editing. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
+    description: 'Explore focused source, call paths, and blast radius before broad reading or editing. Automatically initializes a missing worktree index. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -117,11 +118,11 @@ const TOOLS: Tool[] = [
       required: ['query'],
       additionalProperties: false,
     },
-    annotations: READ_ONLY,
+    annotations: MAY_INITIALIZE_INDEX,
   },
   {
     name: 'review',
-    description: 'Build a structured, diff-aware review. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
+    description: 'Build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -140,13 +141,14 @@ const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     outputSchema: REVIEW_OUTPUT_SCHEMA,
-    annotations: READ_ONLY,
+    annotations: MAY_INITIALIZE_INDEX,
   },
 ];
 
 export interface CodeIntelServerOptions {
   projectPath: string;
-  bridge: GraphReader;
+  bridge: GraphReader & { ensureProjectIndex?: (projectPath?: string) => Promise<void> };
+  ensureIndex?: (projectPath: string) => Promise<void>;
 }
 
 export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
@@ -154,7 +156,7 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
     { name: 'code-intel', version: CODE_INTEL_VERSION },
     {
       capabilities: { tools: {} },
-      instructions: 'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace. After changes use review for the working tree or a base/head range. Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups. Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment. Both tools are read-only and share one persistent CodeGraph connection.',
+      instructions: 'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace. Missing Git worktree indexes are initialized automatically before either tool runs. After changes use review for the working tree or a base/head range. Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups. Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment. Both tools leave source files unchanged and share one persistent CodeGraph connection.',
     },
   );
 
@@ -163,20 +165,25 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
     try {
       if (request.params.name === 'explore') {
         const input = ExploreInput.parse(request.params.arguments ?? {});
+        const projectPath = input.projectPath ?? options.projectPath;
+        await indexEnsurer(options)(projectPath);
         const text = await options.bridge.callText('codegraph_explore', {
           query: input.query,
           maxFiles: input.maxFiles,
-          projectPath: input.projectPath ?? options.projectPath,
+          projectPath,
         });
         return textResult(text);
       }
 
       if (request.params.name === 'review') {
         const input = ReviewInput.parse(request.params.arguments ?? {});
-        const report = await new ReviewAnalyzer(options.bridge).analyze({
+        const reviewRequest = {
           ...input,
           projectPath: input.projectPath ?? options.projectPath,
-        });
+        };
+        validateReviewRequest(reviewRequest);
+        await indexEnsurer(options)(reviewRequest.projectPath);
+        const report = await new ReviewAnalyzer(options.bridge).analyze(reviewRequest);
         return reportResult(report);
       }
 
@@ -187,6 +194,14 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
   });
 
   return server;
+}
+
+function indexEnsurer(options: CodeIntelServerOptions): (projectPath: string) => Promise<void> {
+  if (options.ensureIndex) return options.ensureIndex;
+  if (options.bridge.ensureProjectIndex) {
+    return (projectPath) => options.bridge.ensureProjectIndex!(projectPath);
+  }
+  return ensureProjectIndex;
 }
 
 function textResult(text: string): CallToolResult {
