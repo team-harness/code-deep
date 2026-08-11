@@ -8,6 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/team-harness/code-intel.git"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "bin": {
     "code-intel": "./dist/cli.js"
   },
