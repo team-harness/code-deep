@@ -61,9 +61,30 @@ describe('ReviewAnalyzer', () => {
       file: 'src/auth.ts',
       affectedCount: 2,
     });
+    expect(report.schemaVersion).toBe(1);
+    expect(report.reviewItems[0]).toMatchObject({
+      id: 'src/auth.ts:login:16',
+      file: 'src/auth.ts',
+      symbol: { name: 'login', kind: 'function', line: 16 },
+      mappingConfidence: 'medium',
+      impact: {
+        affectedCount: 2,
+        confidence: 'high',
+      },
+      tests: {
+        status: 'missing',
+        relatedFiles: [],
+      },
+    });
+    expect(report.reviewItems[0]?.risk.reasons.map((reason) => reason.code)).toEqual([
+      'sensitive-symbol',
+      'tests-unlinked',
+      'graph-impact',
+    ]);
     expect(report.graphContext).toBe('verbatim graph context');
     expect(report.files[0]?.patch).toContain('+  validateSession(user)');
     expect(report.markdown).toContain('## Diff');
+    expect(report.markdown).toContain('## Review priorities');
     expect(report.markdown).toContain('verbatim graph context');
     expect(calls.map((call) => call.name)).toEqual([
       'codegraph_node',
@@ -257,6 +278,55 @@ diff --git a/two.ts b/two.ts
     });
     expect(report.riskSignals).toContainEqual(expect.objectContaining({
       code: 'analysis-truncated',
+    }));
+  });
+
+  it('reports omitted symbols and distinguishes changed tests from linked tests', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') {
+          return '- `one` (function) — :1\n- `two` (function) — :2';
+        }
+        if (name === 'codegraph_impact') {
+          return '**Impact: "one" affects 1 symbol**\n\n**src/value.ts:**\none:1';
+        }
+        return 'value context';
+      },
+    };
+    const diff = `diff --git a/src/value.ts b/src/value.ts
+--- a/src/value.ts
++++ b/src/value.ts
+@@ -1,2 +1,2 @@
+-export function one() { return 1 }
+-export function two() { return 2 }
++export function one() { return 10 }
++export function two() { return 20 }
+diff --git a/tests/value.test.ts b/tests/value.test.ts
+--- a/tests/value.test.ts
++++ b/tests/value.test.ts
+@@ -1 +1 @@
+-expect(one()).toBe(1)
++expect(one()).toBe(10)
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff,
+      maxSymbols: 1,
+    });
+
+    expect(report.summary).toMatchObject({
+      symbolsMapped: 3,
+      symbolsAnalyzed: 1,
+      symbolsOmitted: 2,
+    });
+    expect(report.riskSignals).toContainEqual(expect.objectContaining({
+      code: 'symbol-analysis-truncated',
+    }));
+    expect(report.reviewItems[0]?.tests.status).toBe('changed');
+    expect(report.reviewItems[0]?.risk.reasons).toContainEqual(expect.objectContaining({
+      code: 'tests-unlinked',
+      score: 10,
     }));
   });
 

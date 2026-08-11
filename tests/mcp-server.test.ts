@@ -44,4 +44,63 @@ describe('code-intel MCP server', () => {
       },
     ]);
   });
+
+  it('returns versioned review items through MCP structured content', async () => {
+    const bridge = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `login` (function) — :1';
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "login" affects 2 symbols**',
+            '',
+            '**src/auth.ts:**',
+            'login:1',
+            '',
+            '**tests/auth.test.ts:**',
+            'login test:8',
+          ].join('\n');
+        }
+        return 'login context';
+      },
+    };
+    const server = createCodeIntelServer({ projectPath: '/repo', bridge });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: 'review',
+      arguments: {
+        diff: [
+          'diff --git a/src/auth.ts b/src/auth.ts',
+          '--- a/src/auth.ts',
+          '+++ b/src/auth.ts',
+          '@@ -1 +1 @@',
+          '-export function login() { return false }',
+          '+export function login() { return true }',
+        ].join('\n'),
+      },
+    });
+    const structured = result.structuredContent as {
+      schemaVersion: number;
+      reviewItems: Array<Record<string, unknown>>;
+    };
+
+    expect(structured.schemaVersion).toBe(1);
+    expect(structured.reviewItems).toEqual([
+      expect.objectContaining({
+        id: 'src/auth.ts:login:1',
+        tests: expect.objectContaining({
+          status: 'linked',
+          relatedFiles: ['tests/auth.test.ts'],
+        }),
+      }),
+    ]);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('## Review priorities'),
+    }));
+  });
 });

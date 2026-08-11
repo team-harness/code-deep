@@ -3,12 +3,17 @@ import { execFile } from 'node:child_process';
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import {
+  CodeGraphAdapter,
+  type GraphImpact,
+  type GraphReader,
+  isTestPath,
+  parseSymbolCatalog,
+} from './graph-adapter.js';
 
 const exec = promisify(execFile);
 
-export interface GraphReader {
-  callText(name: string, args: Record<string, unknown>): Promise<string>;
-}
+export type { GraphReader } from './graph-adapter.js';
 
 export interface ReviewRequest {
   projectPath: string;
@@ -25,6 +30,8 @@ export interface ReviewSymbol {
   line: number;
 }
 
+export type ReviewConfidence = 'high' | 'medium' | 'low';
+
 export interface ReviewedFile {
   path: string;
   status: 'added' | 'deleted' | 'renamed' | 'modified';
@@ -33,6 +40,8 @@ export interface ReviewedFile {
   changedLines: number[];
   symbols: ReviewSymbol[];
   graphSummary: string;
+  graphConfidence?: ReviewConfidence;
+  graphWarnings?: string[];
   patch: string;
 }
 
@@ -51,11 +60,51 @@ export interface RiskSignal {
   message: string;
 }
 
+export type ReviewTestStatus = 'linked' | 'changed' | 'missing' | 'unknown';
+
+export interface ReviewItemRisk {
+  score: number;
+  level: RiskLevel;
+  reasons: RiskSignal[];
+}
+
+export interface ReviewAffectedSymbol {
+  file: string;
+  name: string;
+  line: number;
+}
+
+export interface ReviewItemImpact {
+  affectedCount: number;
+  affectedSymbols: ReviewAffectedSymbol[];
+  testFiles: string[];
+  confidence: ReviewConfidence;
+  warnings: string[];
+}
+
+export interface ReviewItem {
+  id: string;
+  file: string;
+  symbol: ReviewSymbol;
+  mappingConfidence: ReviewConfidence;
+  impact: ReviewItemImpact;
+  tests: {
+    status: ReviewTestStatus;
+    relatedFiles: string[];
+    changedFiles: string[];
+  };
+  risk: ReviewItemRisk;
+}
+
 export interface ReviewReport {
+  schemaVersion: 1;
   summary: {
     filesChanged: number;
     filesAnalyzed: number;
     filesOmitted: number;
+    symbolsMapped: number;
+    symbolsAnalyzed: number;
+    symbolsOmitted: number;
     additions: number;
     deletions: number;
     riskScore: number;
@@ -63,13 +112,18 @@ export interface ReviewReport {
   };
   files: ReviewedFile[];
   impacts: SymbolImpact[];
+  reviewItems: ReviewItem[];
   riskSignals: RiskSignal[];
   graphContext: string;
   markdown: string;
 }
 
 export class ReviewAnalyzer {
-  constructor(private readonly graph: GraphReader) {}
+  private readonly graph: CodeGraphAdapter;
+
+  constructor(reader: GraphReader) {
+    this.graph = new CodeGraphAdapter(reader);
+  }
 
   async analyze(request: ReviewRequest): Promise<ReviewReport> {
     const diff = request.diff ?? await readGitDiff(request);
@@ -87,15 +141,17 @@ export class ReviewAnalyzer {
       const changedLines = changedLineNumbers(file);
       let graphSummary = '';
       let symbols: ReviewSymbol[] = [];
+      let graphConfidence: ReviewConfidence = 'low';
+      let graphWarnings: string[] = [];
       try {
-        graphSummary = await this.graph.callText('codegraph_node', {
-          file: path,
-          symbolsOnly: true,
-          projectPath: request.projectPath,
-        });
-        symbols = symbolsAtLines(parseSymbolMap(graphSummary), changedLines);
+        const catalog = await this.graph.getSymbols(path, request.projectPath);
+        graphSummary = catalog.rawText;
+        graphConfidence = catalog.confidence;
+        graphWarnings = catalog.warnings;
+        symbols = symbolsAtLines(catalog.symbols, changedLines);
       } catch (error) {
         graphSummary = `CodeGraph lookup failed: ${errorMessage(error)}`;
+        graphWarnings = ['symbol-lookup-failed'];
       }
 
       files.push({
@@ -106,35 +162,58 @@ export class ReviewAnalyzer {
         changedLines,
         symbols,
         graphSummary,
+        graphConfidence,
+        graphWarnings,
         patch: filePatch(file, patchBudget),
       });
     }
 
-    const changedSymbols = uniqueSymbols(files).slice(0, request.maxSymbols ?? 12);
+    const mappedSymbols = uniqueSymbols(files);
+    const changedSymbols = mappedSymbols.slice(0, request.maxSymbols ?? 12);
+    const symbolsOmitted = Math.max(0, mappedSymbols.length - changedSymbols.length);
     const impacts: SymbolImpact[] = [];
+    const structuredImpacts = new Map<string, GraphImpact>();
     for (const item of changedSymbols) {
       try {
-        const details = await this.graph.callText('codegraph_impact', {
-          symbol: item.symbol.name,
-          file: item.file,
-          depth: 2,
-          projectPath: request.projectPath,
-        });
+        const impact = await this.graph.getImpact(
+          item.symbol.name,
+          item.file,
+          request.projectPath,
+        );
+        structuredImpacts.set(reviewItemId(item.file, item.symbol), impact);
         impacts.push({
           symbol: item.symbol.name,
           file: item.file,
-          affectedCount: countListItems(details),
-          details,
+          affectedCount: impact.affectedCount,
+          details: impact.rawText,
         });
       } catch (error) {
+        const details = `CodeGraph impact lookup failed: ${errorMessage(error)}`;
+        structuredImpacts.set(
+          reviewItemId(item.file, item.symbol),
+          failedGraphImpact(item.symbol.name, item.file, details),
+        );
         impacts.push({
           symbol: item.symbol.name,
           file: item.file,
           affectedCount: 0,
-          details: `CodeGraph impact lookup failed: ${errorMessage(error)}`,
+          details,
         });
       }
     }
+
+    const changedTestFiles = files
+      .map((file) => file.path)
+      .filter((path) => isTestPath(path));
+    const reviewItems = changedSymbols
+      .map((item) => buildReviewItem(
+        item.file,
+        item.symbol,
+        files,
+        structuredImpacts.get(reviewItemId(item.file, item.symbol))!,
+        changedTestFiles,
+      ))
+      .sort((left, right) => right.risk.score - left.risk.score || left.id.localeCompare(right.id));
 
     const queryTerms = changedSymbols.length
       ? changedSymbols.map((item) => item.symbol.name)
@@ -142,11 +221,11 @@ export class ReviewAnalyzer {
     let graphContext = '';
     if (queryTerms.length) {
       try {
-        graphContext = await this.graph.callText('codegraph_explore', {
-          query: queryTerms.join(' '),
-          maxFiles: Math.min(files.length + 4, 12),
-          projectPath: request.projectPath,
-        });
+        graphContext = (await this.graph.explore(
+          queryTerms.join(' '),
+          request.projectPath,
+          Math.min(files.length + 4, 12),
+        )).text;
       } catch (error) {
         graphContext = `CodeGraph explore failed: ${errorMessage(error)}`;
       }
@@ -161,6 +240,13 @@ export class ReviewAnalyzer {
         message: `${filesOmitted} changed file${filesOmitted === 1 ? ' was' : 's were'} omitted by maxFiles.`,
       });
     }
+    if (symbolsOmitted) {
+      riskSignals.push({
+        code: 'symbol-analysis-truncated',
+        score: 10,
+        message: `${symbolsOmitted} mapped symbol${symbolsOmitted === 1 ? ' was' : 's were'} omitted by maxSymbols.`,
+      });
+    }
     const riskScore = Math.min(
       100,
       riskSignals.reduce((total, signal) => total + signal.score, 0),
@@ -169,15 +255,20 @@ export class ReviewAnalyzer {
       filesChanged: parsed.length,
       filesAnalyzed: files.length,
       filesOmitted,
+      symbolsMapped: mappedSymbols.length,
+      symbolsAnalyzed: changedSymbols.length,
+      symbolsOmitted,
       additions: parsed.reduce((total, file) => total + file.additions, 0),
       deletions: parsed.reduce((total, file) => total + file.deletions, 0),
       riskScore,
       riskLevel: riskLevel(riskScore),
     };
     const report: ReviewReport = {
+      schemaVersion: 1,
       summary,
       files,
       impacts,
+      reviewItems,
       riskSignals,
       graphContext,
       markdown: '',
@@ -322,16 +413,7 @@ function changedLineNumbers(file: parseDiff.File): number[] {
 }
 
 export function parseSymbolMap(text: string): ReviewSymbol[] {
-  const symbols: ReviewSymbol[] = [];
-  const pattern = /^- `([^`]+)` \(([^)]+)\).* — :(\d+)$/gm;
-  for (const match of text.matchAll(pattern)) {
-    symbols.push({
-      name: match[1]!,
-      kind: match[2]!,
-      line: Number(match[3]),
-    });
-  }
-  return symbols.sort((left, right) => left.line - right.line);
+  return parseSymbolCatalog('', text).symbols;
 }
 
 function symbolsAtLines(symbols: ReviewSymbol[], lines: number[]): ReviewSymbol[] {
@@ -358,10 +440,145 @@ function uniqueSymbols(files: ReviewedFile[]): Array<{ file: string; symbol: Rev
   return [...unique.values()];
 }
 
-function countListItems(text: string): number {
-  const impactHeader = text.match(/\baffects\s+([\d,]+)\s+symbols?\b/i);
-  if (impactHeader?.[1]) return Number(impactHeader[1].replaceAll(',', ''));
-  return text.match(/^- /gm)?.length ?? 0;
+function reviewItemId(file: string, symbol: ReviewSymbol): string {
+  return `${file}:${symbol.name}:${symbol.line}`;
+}
+
+function failedGraphImpact(symbol: string, file: string, details: string): GraphImpact {
+  return {
+    schemaVersion: 1,
+    symbol,
+    file,
+    affectedCount: 0,
+    affectedSymbols: [],
+    testFiles: [],
+    confidence: 'low',
+    warnings: ['impact-lookup-failed'],
+    rawText: details,
+  };
+}
+
+function buildReviewItem(
+  filePath: string,
+  symbol: ReviewSymbol,
+  files: ReviewedFile[],
+  impact: GraphImpact,
+  changedTestFiles: string[],
+): ReviewItem {
+  const file = files.find((candidate) => candidate.path === filePath);
+  const mappingConfidence = symbolMappingConfidence(file, symbol);
+  const tests = testEvidence(impact, changedTestFiles);
+  const reasons: RiskSignal[] = [];
+
+  if (isSensitiveReviewTarget(filePath, symbol.name)) {
+    reasons.push({
+      code: 'sensitive-symbol',
+      score: 25,
+      message: `${symbol.name} is in a security or data-sensitive path.`,
+    });
+  }
+  if (tests.status === 'missing') {
+    reasons.push({
+      code: 'tests-unlinked',
+      score: 20,
+      message: `No related test symbol was found in the impact graph for ${symbol.name}.`,
+    });
+  } else if (tests.status === 'changed') {
+    reasons.push({
+      code: 'tests-unlinked',
+      score: 10,
+      message: `Test files changed, but none were linked to ${symbol.name} in the impact graph.`,
+    });
+  }
+  if (impact.affectedCount >= 10) {
+    reasons.push({
+      code: 'wide-impact',
+      score: 20,
+      message: `${symbol.name} can affect ${impact.affectedCount} indexed symbols.`,
+    });
+  } else if (impact.affectedCount >= 5) {
+    reasons.push({
+      code: 'wide-impact',
+      score: 12,
+      message: `${symbol.name} can affect ${impact.affectedCount} indexed symbols.`,
+    });
+  } else if (impact.affectedCount > 0) {
+    reasons.push({
+      code: 'graph-impact',
+      score: 5,
+      message: `${symbol.name} reaches ${impact.affectedCount} indexed symbols.`,
+    });
+  }
+  if (mappingConfidence === 'low') {
+    reasons.push({
+      code: 'mapping-uncertain',
+      score: 5,
+      message: `The changed lines could not be mapped to ${symbol.name} with confidence.`,
+    });
+  }
+  const changedLines = file ? file.additions + file.deletions : 0;
+  if (changedLines >= 100) {
+    reasons.push({
+      code: 'large-file-change',
+      score: changedLines >= 500 ? 20 : 12,
+      message: `${changedLines} lines changed in ${filePath}.`,
+    });
+  }
+
+  const score = Math.min(100, reasons.reduce((total, reason) => total + reason.score, 0));
+  return {
+    id: reviewItemId(filePath, symbol),
+    file: filePath,
+    symbol,
+    mappingConfidence,
+    impact: {
+      affectedCount: impact.affectedCount,
+      affectedSymbols: impact.affectedSymbols,
+      testFiles: impact.testFiles,
+      confidence: impact.confidence,
+      warnings: impact.warnings,
+    },
+    tests,
+    risk: {
+      score,
+      level: riskLevel(score),
+      reasons,
+    },
+  };
+}
+
+function symbolMappingConfidence(
+  file: ReviewedFile | undefined,
+  symbol: ReviewSymbol,
+): ReviewConfidence {
+  if (!file || file.graphConfidence === 'low') return 'low';
+  return file.changedLines.includes(symbol.line) ? 'high' : 'medium';
+}
+
+function testEvidence(
+  impact: GraphImpact,
+  changedTestFiles: string[],
+): ReviewItem['tests'] {
+  if (impact.testFiles.length) {
+    return {
+      status: 'linked',
+      relatedFiles: impact.testFiles,
+      changedFiles: changedTestFiles.filter((path) => impact.testFiles.includes(path)),
+    };
+  }
+  if (changedTestFiles.length) {
+    return { status: 'changed', relatedFiles: [], changedFiles: changedTestFiles };
+  }
+  if (impact.confidence === 'low') {
+    return { status: 'unknown', relatedFiles: [], changedFiles: [] };
+  }
+  return { status: 'missing', relatedFiles: [], changedFiles: [] };
+}
+
+function isSensitiveReviewTarget(file: string, symbol = ''): boolean {
+  const sensitivePath = /(?:^|[/_.-])(auth|security|permission|payment|billing|migration|schema|crypto|secret)(?:[/_.-]|$)/i;
+  const sensitiveSymbol = /(auth|login|password|token|session|crypt|secret|credential|permission|payment|billing|migration|schema|encrypt|decrypt|sign|verify)/i;
+  return sensitivePath.test(file) || sensitiveSymbol.test(symbol);
 }
 
 function errorMessage(error: unknown): string {
@@ -464,10 +681,31 @@ export function renderReviewMarkdown(report: ReviewReport): string {
     ...(report.summary.filesOmitted
       ? [`Analyzed: ${report.summary.filesAnalyzed}; omitted by maxFiles: ${report.summary.filesOmitted}`]
       : []),
+    ...(report.summary.symbolsOmitted
+      ? [`Mapped symbols: ${report.summary.symbolsMapped}; analyzed: ${report.summary.symbolsAnalyzed}; omitted by maxSymbols: ${report.summary.symbolsOmitted}`]
+      : []),
+    '',
+    '## Review priorities',
+    '',
+  ];
+  if (report.reviewItems.length) {
+    for (const item of report.reviewItems) {
+      const reasons = item.risk.reasons.length
+        ? item.risk.reasons.map((reason) => reason.code).join(', ')
+        : 'no elevated signals';
+      lines.push(
+        `- **${item.risk.level} ${item.risk.score}/100** ${item.symbol.name} (${item.file}:${item.symbol.line})`,
+        `  Tests: ${item.tests.status}; mapping: ${item.mappingConfidence}; impact: ${item.impact.affectedCount}; reasons: ${reasons}`,
+      );
+    }
+  } else {
+    lines.push('- No changed symbols were mapped.');
+  }
+  lines.push(
     '',
     '## Changed symbols',
     '',
-  ];
+  );
   for (const file of report.files) {
     const symbols = file.symbols.length
       ? file.symbols.map((symbol) => `${symbol.name}:${symbol.line}`).join(', ')

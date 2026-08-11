@@ -6,8 +6,14 @@ export {
 } from './client.js';
 export type {
   ReviewedFile,
+  ReviewAffectedSymbol,
+  ReviewConfidence,
+  ReviewItem,
+  ReviewItemImpact,
+  ReviewItemRisk,
   ReviewReport,
   ReviewSymbol,
+  ReviewTestStatus,
   RiskLevel,
   RiskSignal,
   SymbolImpact,

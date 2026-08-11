@@ -113,6 +113,24 @@ The bridge lazily starts CodeGraph on the first tool call, reuses that connectio
 
 Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, diff size, file count, and deleted files. They prioritize review effort; they are not claims that a bug exists.
 
+Every report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
+item represents one changed symbol and includes normalized impact symbols,
+related test files, mapping and impact confidence, parser warnings, and the exact
+reasons contributing to its per-symbol risk score. Existing report fields remain
+available for compatibility.
+
+```ts
+const report = await codeIntel.review();
+for (const item of report.reviewItems) {
+  console.log(item.risk.level, item.symbol.name, item.tests.status);
+}
+```
+
+The internal graph adapter keeps CodeGraph's original text in each impact result
+for diagnostics, but downstream consumers no longer need to parse that display
+format themselves. Unknown or changed backend formats produce explicit
+low-confidence warnings instead of silently appearing as an empty graph result.
+
 Changed hunks are mapped to the nearest preceding symbol in the current CodeGraph index. Deleted files and symbols can be absent from that index, so deletion findings are explicitly treated as uncertain. A future base-revision index can remove that limitation.
 
 ## Library use
