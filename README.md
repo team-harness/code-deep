@@ -72,6 +72,22 @@ code-intel review /path/to/project --json
 
 The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied unified `diff`. With no diff or range it reviews the target project's current working tree.
 
+## Process diagnostics
+
+Inspect the local code-intel wrappers, CodeGraph proxies, shared project daemons,
+and watchdogs without changing any process or file:
+
+```bash
+code-intel ps
+code-intel ps --json
+```
+
+The JSON report has `schemaVersion: 1` and records each process's role, status,
+project, parent PID, uptime, supporting evidence, and whether strong evidence
+makes it a future cleanup candidate. A long-running process is never classified
+as an orphan based on age alone. This release does not terminate processes or
+remove stale metadata.
+
 ## Architecture
 
 ```text

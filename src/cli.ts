@@ -9,11 +9,12 @@ import { CodeGraphBridge } from './codegraph-bridge.js';
 import { installCodeIntel, parseInstallTargets } from './installer.js';
 import { createCodeIntelServer } from './mcp-server.js';
 import { initializeProjectIndex } from './project-index.js';
+import { collectProcessReport, renderProcessReport } from './process-report.js';
 
 const program = new Command()
   .name('code-intel')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version('0.2.1');
+  .version('0.3.0');
 
 program
   .command('install')
@@ -28,6 +29,18 @@ program
       process.stdout.write(`${file.action.padEnd(9)} ${file.path}\n`);
       if (file.backupPath) process.stdout.write(`backup    ${file.backupPath}\n`);
     }
+  });
+
+program
+  .command('ps')
+  .alias('processes')
+  .description('Inspect code-intel and CodeGraph process health (read-only)')
+  .option('--json', 'Print the versioned JSON report')
+  .action(async (options: { json?: boolean }) => {
+    const report = await collectProcessReport();
+    process.stdout.write(options.json
+      ? `${JSON.stringify(report, null, 2)}\n`
+      : `${renderProcessReport(report)}\n`);
   });
 
 program
