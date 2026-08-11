@@ -12,6 +12,8 @@ import {
 } from './graph-adapter.js';
 
 const exec = promisify(execFile);
+const SOURCE_PATH = /\.(?:[cm]?[jt]sx?|pyi?|go|rs|java|kts?|swift|cs|php|rb|c|h|cc|cpp|cxx|hpp|scala|dart|lua|r|sol|sql|tf|nix|exs?|erl|hrl|fsx?|vb|vue|svelte|astro|sh)$/i;
+const NON_SENSITIVE_SYMBOLS = new Set(['GRAPH_ADAPTER_SCHEMA_VERSION']);
 
 export type { GraphReader } from './graph-adapter.js';
 
@@ -128,6 +130,15 @@ export class ReviewAnalyzer {
   async analyze(request: ReviewRequest): Promise<ReviewReport> {
     const diff = request.diff ?? await readGitDiff(request);
     const parsed = parseDiff(diff);
+    const riskFiles = parsed.flatMap((file) => {
+      const path = reviewPath(file);
+      return path ? [{
+        path,
+        status: fileStatus(file),
+        additions: file.additions,
+        deletions: file.deletions,
+      }] : [];
+    });
     const selected = parsed.slice(0, request.maxFiles ?? 20);
     const patchBudget = Math.max(
       2_000,
@@ -143,15 +154,17 @@ export class ReviewAnalyzer {
       let symbols: ReviewSymbol[] = [];
       let graphConfidence: ReviewConfidence = 'low';
       let graphWarnings: string[] = [];
-      try {
-        const catalog = await this.graph.getSymbols(path, request.projectPath);
-        graphSummary = catalog.rawText;
-        graphConfidence = catalog.confidence;
-        graphWarnings = catalog.warnings;
-        symbols = symbolsAtLines(catalog.symbols, changedLines);
-      } catch (error) {
-        graphSummary = `CodeGraph lookup failed: ${errorMessage(error)}`;
-        graphWarnings = ['symbol-lookup-failed'];
+      if (isSourcePath(path)) {
+        try {
+          const catalog = await this.graph.getSymbols(path, request.projectPath);
+          graphSummary = catalog.rawText;
+          graphConfidence = catalog.confidence;
+          graphWarnings = catalog.warnings;
+          symbols = symbolsAtLines(catalog.symbols, changedLines);
+        } catch (error) {
+          graphSummary = `CodeGraph lookup failed: ${errorMessage(error)}`;
+          graphWarnings = ['symbol-lookup-failed'];
+        }
       }
 
       files.push({
@@ -202,7 +215,7 @@ export class ReviewAnalyzer {
       }
     }
 
-    const changedTestFiles = files
+    const changedTestFiles = riskFiles
       .map((file) => file.path)
       .filter((path) => isTestPath(path));
     const reviewItems = changedSymbols
@@ -217,7 +230,7 @@ export class ReviewAnalyzer {
 
     const queryTerms = changedSymbols.length
       ? changedSymbols.map((item) => item.symbol.name)
-      : files.map((file) => file.path);
+      : files.filter((file) => isSourcePath(file.path)).map((file) => file.path);
     let graphContext = '';
     if (queryTerms.length) {
       try {
@@ -232,7 +245,15 @@ export class ReviewAnalyzer {
     }
 
     const filesOmitted = Math.max(0, parsed.length - files.length);
-    const riskSignals = scoreRisk(files, impacts);
+    const riskSignals = scoreRisk(riskFiles, impacts);
+    const analysisWarnings = collectAnalysisWarnings(files, reviewItems, graphContext);
+    if (analysisWarnings.length) {
+      riskSignals.push({
+        code: 'graph-analysis-incomplete',
+        score: 25,
+        message: `${analysisWarnings.length} CodeGraph warning${analysisWarnings.length === 1 ? '' : 's'} make this review incomplete; inspect Analysis warnings and run targeted explore calls.`,
+      });
+    }
     if (filesOmitted) {
       riskSignals.push({
         code: 'analysis-truncated',
@@ -577,17 +598,22 @@ function testEvidence(
 
 function isSensitiveReviewTarget(file: string, symbol = ''): boolean {
   const sensitivePath = /(?:^|[/_.-])(auth|security|permission|payment|billing|migration|schema|crypto|secret)(?:[/_.-]|$)/i;
+  if (NON_SENSITIVE_SYMBOLS.has(symbol)) return sensitivePath.test(file);
   const sensitiveWords = new Set([
     'auth', 'authentication', 'authorization', 'oauth', 'login', 'password',
     'token', 'session', 'crypt', 'crypto', 'secret', 'credential', 'permission',
-    'payment', 'billing', 'encrypt', 'decrypt', 'signature', 'verify',
+    'payment', 'billing', 'encrypt', 'decrypt', 'sign', 'signature', 'verify',
+    'migration', 'migrate', 'schema',
   ]);
   const symbolWords = symbol
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
-  return sensitivePath.test(file) || symbolWords.some((word) => sensitiveWords.has(word));
+  return sensitivePath.test(file) || symbolWords.some((word) =>
+    sensitiveWords.has(word)
+    || (word.endsWith('s') && sensitiveWords.has(word.slice(0, -1))),
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -595,7 +621,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function scoreRisk(
-  files: ReviewedFile[],
+  files: Array<Pick<ReviewedFile, 'path' | 'status' | 'additions' | 'deletions'>>,
   impacts: SymbolImpact[],
 ): RiskSignal[] {
   const signals: RiskSignal[] = [];
@@ -611,9 +637,8 @@ export function scoreRisk(
   }
 
   const testPath = /(?:^|\/)(?:__tests__|tests?|specs?)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i;
-  const sourcePath = /\.(?:[cm]?[jt]sx?|pyi?|go|rs|java|kts?|swift|cs|php|rb|c|h|cc|cpp|cxx|hpp|scala|dart|lua|r|sol|sql|tf|nix|exs?|erl|hrl|fsx?|vb|vue|svelte|astro|sh)$/i;
   const sourceChanged = files.some((file) =>
-    sourcePath.test(file.path) && !testPath.test(file.path),
+    isSourcePath(file.path) && !testPath.test(file.path),
   );
   const testsChanged = files.some((file) => testPath.test(file.path));
   if (sourceChanged && !testsChanged) {
@@ -674,6 +699,10 @@ export function scoreRisk(
   return signals;
 }
 
+function isSourcePath(path: string): boolean {
+  return SOURCE_PATH.test(path);
+}
+
 function riskLevel(score: number): RiskLevel {
   if (score >= 75) return 'critical';
   if (score >= 50) return 'high';
@@ -682,6 +711,11 @@ function riskLevel(score: number): RiskLevel {
 }
 
 export function renderReviewMarkdown(report: ReviewReport): string {
+  const analysisWarnings = collectAnalysisWarnings(
+    report.files,
+    report.reviewItems,
+    report.graphContext,
+  );
   const lines = [
     '# Code review intelligence',
     '',
@@ -708,7 +742,13 @@ export function renderReviewMarkdown(report: ReviewReport): string {
       );
     }
   } else {
-    lines.push('- No changed symbols were mapped.');
+    lines.push(analysisWarnings.length
+      ? '- No changed symbols were mapped because graph analysis was incomplete; inspect the warnings below.'
+      : '- No changed symbols were mapped.');
+  }
+  if (analysisWarnings.length) {
+    lines.push('', '## Analysis warnings', '');
+    for (const warning of analysisWarnings) lines.push(`- ${warning}`);
   }
   lines.push(
     '',
@@ -740,4 +780,26 @@ export function renderReviewMarkdown(report: ReviewReport): string {
     lines.push('## CodeGraph context', '', report.graphContext);
   }
   return lines.join('\n');
+}
+
+function collectAnalysisWarnings(
+  files: ReviewedFile[],
+  reviewItems: ReviewItem[],
+  graphContext: string,
+): string[] {
+  const warnings = new Set<string>();
+  for (const file of files) {
+    for (const warning of file.graphWarnings ?? []) {
+      warnings.add(`${file.path}: ${warning}`);
+    }
+  }
+  for (const item of reviewItems) {
+    for (const warning of item.impact.warnings) {
+      warnings.add(`${item.file}:${item.symbol.line} ${item.symbol.name}: ${warning}`);
+    }
+  }
+  if (graphContext.startsWith('CodeGraph explore failed:')) {
+    warnings.add(`explore: ${graphContext}`);
+  }
+  return [...warnings];
 }

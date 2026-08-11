@@ -4,6 +4,7 @@ export {
   type CodeIntelReviewOptions,
   type ExploreOptions,
 } from './client.js';
+export { CODEGRAPH_VERSION, CODE_INTEL_VERSION } from './version.js';
 export type {
   ReviewedFile,
   ReviewAffectedSymbol,

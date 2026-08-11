@@ -44,8 +44,12 @@ describe('code-intel installer', () => {
     expect(installedConfig).toContain('args = ["-y", "@team-harness/code-intel", "mcp"]');
     expect(installedInstructions).toContain('<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->');
     expect(installedInstructions).toContain('<!-- CODE_INTEL_START -->');
-    expect(installedInstructions).toContain('Use `explore` for code discovery');
-    expect(installedInstructions).toContain('Use `review` before finalizing changes');
+    expect(installedInstructions).toContain('absolute Git root as `projectPath`');
+    expect(installedInstructions).toContain('task goal, relevant symbols or files, and the relationship');
+    expect(installedInstructions).toContain('Process `reviewItems` in descending risk order');
+    expect(installedInstructions).toContain('`linked`, `changed`, `missing`, or `unknown`');
+    expect(installedInstructions).toContain('run a targeted `explore`');
+    expect(installedInstructions).toContain('verify a concrete failure path');
     expect(await readFile(`${configPath}.code-intel.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);
 
@@ -53,6 +57,51 @@ describe('code-intel installer', () => {
     expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged']);
     expect(await readFile(configPath, 'utf8')).toBe(installedConfig);
     expect(await readFile(instructionsPath, 'utf8')).toBe(installedInstructions);
+  });
+
+  it('updates an equivalent quoted Codex MCP table without declaring it twice', async () => {
+    const homeDir = await makeHome();
+    const codexDir = join(homeDir, '.codex');
+    await mkdir(codexDir, { recursive: true });
+    const configPath = join(codexDir, 'config.toml');
+    await writeFile(configPath, [
+      'model = "gpt-5"',
+      '',
+      '[mcp_servers."code-intel"]',
+      'command = "old-command"',
+      'args = ["old"]',
+      '',
+      '[mcp_servers.existing]',
+      'command = "existing"',
+      '',
+    ].join('\n'));
+
+    await installCodeIntel({ homeDir, targets: ['codex'] });
+
+    const installed = await readFile(configPath, 'utf8');
+    expect(installed.match(/\[mcp_servers\.(?:code-intel|"code-intel")\]/g)).toHaveLength(1);
+    expect(installed).toContain('[mcp_servers.code-intel]\ncommand = "npx"');
+    expect(installed).toContain('[mcp_servers.existing]\ncommand = "existing"');
+  });
+
+  it('refuses an already duplicated equivalent Codex MCP table', async () => {
+    const homeDir = await makeHome();
+    const codexDir = join(homeDir, '.codex');
+    await mkdir(codexDir, { recursive: true });
+    const configPath = join(codexDir, 'config.toml');
+    const duplicated = [
+      '[mcp_servers.code-intel]',
+      'command = "one"',
+      '',
+      '[mcp_servers."code-intel"]',
+      'command = "two"',
+      '',
+    ].join('\n');
+    await writeFile(configPath, duplicated);
+
+    await expect(installCodeIntel({ homeDir, targets: ['codex'] }))
+      .rejects.toThrow('declared more than once');
+    expect(await readFile(configPath, 'utf8')).toBe(duplicated);
   });
 
   it('installs Claude MCP, permissions, and instructions while preserving siblings', async () => {

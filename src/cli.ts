@@ -73,7 +73,7 @@ program
 
 program
   .command('explore <query...>')
-  .description('Run one explore call for local diagnostics')
+  .description('Explore focused source, call paths, and blast radius')
   .option('-p, --path <path>', 'Project root', process.cwd())
   .option('--max-files <count>', 'Maximum source files', parsePositiveInteger, 12)
   .action(async (query: string[], options: { path: string; maxFiles: number }) => {
@@ -89,7 +89,7 @@ program
 
 program
   .command('review [path]')
-  .description('Review the current working tree or a Git base/head range')
+  .description('Build a risk-ordered review of the working tree or Git range')
   .option('--base <revision>', 'Git base revision')
   .option('--head <revision>', 'Git head revision; requires --base')
   .option('--json', 'Print the structured JSON report')

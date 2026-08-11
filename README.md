@@ -7,9 +7,10 @@
 
 The npm package is `@team-harness/code-intel`. It installs CodeGraph as an exact dependency; end users do not need a separate global CodeGraph installation.
 
-`code-intel` follows the bundled CodeGraph version. For example, a package that
-depends on `@colbymchenry/codegraph@1.5.0` is released as `code-intel@1.5.0`.
-The build fails its version-policy test if those versions diverge.
+`code-intel` and its bundled CodeGraph dependency have independent versions.
+`CODE_INTEL_VERSION` identifies this wrapper release; `CODEGRAPH_VERSION`
+identifies the exact `@colbymchenry/codegraph` version it runs. This allows the
+bridge and reviewer to ship fixes without waiting for a new upstream release.
 
 ## Install
 
@@ -115,7 +116,7 @@ The bridge lazily starts CodeGraph on the first tool call, reuses that connectio
 
 ## Review semantics
 
-Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, diff size, file count, and deleted files. They prioritize review effort; they are not claims that a bug exists.
+Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, diff size, file count, deleted files, and incomplete graph analysis. Global risk always uses metadata from the complete diff; `maxFiles` and `maxSymbols` limit only deep graph and patch analysis. Scores prioritize review effort; they are not claims that a bug exists.
 
 Every report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
 item represents one changed symbol and includes normalized impact symbols,
@@ -134,6 +135,9 @@ The internal graph adapter keeps CodeGraph's original text in each impact result
 for diagnostics, but downstream consumers no longer need to parse that display
 format themselves. Unknown or changed backend formats produce explicit
 low-confidence warnings instead of silently appearing as an empty graph result.
+The default Markdown report includes these warnings and raises an
+`graph-analysis-incomplete` signal so a failed lookup cannot appear as a clean,
+low-risk review.
 
 Changed hunks are mapped to the nearest preceding symbol in the current CodeGraph index. Deleted files and symbols can be absent from that index, so deletion findings are explicitly treated as uncertain. A future base-revision index can remove that limitation.
 

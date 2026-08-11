@@ -40,9 +40,13 @@ const INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
 
 In repositories with a \`.codegraph/\` directory, use code-intel for code exploration and review assistance:
 
-- Use \`explore\` for code discovery before broad grep/find or reading many indexed source files. Ask with a concrete question, symbol names, or file paths; use the returned source, call paths, and blast radius as focused context.
-- Use \`review\` before finalizing changes. With no arguments it reviews the current working tree; set \`base\` and \`head\` for a branch or pull-request range. Treat the risk score as prioritization and verify findings against the diff and graph context.
-- Shell fallback: \`code-intel explore "<question or symbols>"\` and \`code-intel review [path]\`.
+1. Before broad reading or editing, call \`explore\` with the absolute Git root as \`projectPath\`. Make \`query\` state the task goal, relevant symbols or files, and the relationship to trace (callers, callees, data flow, or blast radius).
+2. After changes, call \`review\` with the same \`projectPath\`. Omit \`base\`/\`head\` for the current working tree; provide both for a branch or pull-request range; use \`diff\` only for a caller-supplied patch.
+3. Process \`reviewItems\` in descending risk order. Test status is \`linked\`, \`changed\`, \`missing\`, or \`unknown\`; risk prioritizes attention and does not prove a bug.
+4. When \`filesOmitted\` or \`symbolsOmitted\` is nonzero, confidence is low, or warnings are present, run a targeted \`explore\` for the affected symbol or path.
+5. Before emitting a review comment, verify a concrete failure path against the diff and focused source context.
+
+Shell fallback: \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`.
 
 If \`.codegraph/\` is missing, ask the user to run \`code-intel init\`; do not create an index implicitly.
 ${INSTRUCTIONS_END}`;
@@ -129,8 +133,17 @@ async function installClaude(homeDir: string): Promise<InstallFileResult[]> {
 
 function upsertTomlTable(content: string, block: string): string {
   const lines = content.split(/(?<=\n)/);
-  const headerIndex = lines.findIndex((line) => line.trim() === '[mcp_servers.code-intel]');
+  const headerIndexes = lines
+    .map((line, index) => isCodeIntelTomlHeader(line) ? index : -1)
+    .filter((index) => index !== -1);
+  if (headerIndexes.length > 1) {
+    throw new Error('Cannot safely update Codex config: code-intel MCP table is declared more than once');
+  }
+  const headerIndex = headerIndexes[0] ?? -1;
   if (headerIndex === -1) {
+    if (lines.some((line) => isCodeIntelDottedAssignment(line))) {
+      throw new Error('Cannot safely update Codex config: code-intel MCP uses dotted assignments instead of a table');
+    }
     const trimmed = content.trimEnd();
     return `${trimmed}${trimmed ? '\n\n' : ''}${block}\n`;
   }
@@ -142,6 +155,23 @@ function upsertTomlTable(content: string, block: string): string {
   const before = lines.slice(0, headerIndex).join('').trimEnd();
   const after = lines.slice(endIndex).join('').trimStart();
   return `${before}${before ? '\n\n' : ''}${block}${after ? `\n\n${after}` : '\n'}`;
+}
+
+const TOML_MCP_KEY = String.raw`(?:mcp_servers|"mcp_servers"|'mcp_servers')`;
+const TOML_CODE_INTEL_KEY = String.raw`(?:code-intel|"code-intel"|'code-intel')`;
+const CODE_INTEL_TABLE_PATTERN = new RegExp(
+  String.raw`^\s*\[\s*${TOML_MCP_KEY}\s*\.\s*${TOML_CODE_INTEL_KEY}\s*\]\s*(?:#.*)?(?:\r?\n)?$`,
+);
+const CODE_INTEL_DOTTED_ASSIGNMENT_PATTERN = new RegExp(
+  String.raw`^\s*${TOML_MCP_KEY}\s*\.\s*${TOML_CODE_INTEL_KEY}(?:\s*\.|\s*=)`,
+);
+
+function isCodeIntelTomlHeader(line: string): boolean {
+  return CODE_INTEL_TABLE_PATTERN.test(line);
+}
+
+function isCodeIntelDottedAssignment(line: string): boolean {
+  return CODE_INTEL_DOTTED_ASSIGNMENT_PATTERN.test(line);
 }
 
 function upsertInstructions(content: string | null): string {

@@ -281,6 +281,58 @@ diff --git a/two.ts b/two.ts
     }));
   });
 
+  it('scores global diff risk even when a sensitive file is omitted from graph analysis', async () => {
+    const graph = { async callText(): Promise<string> { return ''; } };
+    const ordinaryFiles = Array.from({ length: 20 }, (_, index) => `diff --git a/src/file-${index}.ts b/src/file-${index}.ts
+--- a/src/file-${index}.ts
++++ b/src/file-${index}.ts
+@@ -1 +1 @@
+-export const value = 1
++export const value = 2`).join('\n');
+    const sensitiveFile = `diff --git a/src/auth/payment.ts b/src/auth/payment.ts
+--- a/src/auth/payment.ts
++++ b/src/auth/payment.ts
+@@ -1 +1 @@
+-export const charge = oldCharge
++export const charge = newCharge
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff: `${ordinaryFiles}\n${sensitiveFile}`,
+      maxFiles: 20,
+    });
+
+    expect(report.files.map((file) => file.path)).not.toContain('src/auth/payment.ts');
+    expect(report.riskSignals).toContainEqual(expect.objectContaining({
+      code: 'sensitive-path',
+      message: expect.stringContaining('src/auth/payment.ts'),
+    }));
+    expect(report.summary.riskLevel).toBe('high');
+  });
+
+  it('makes graph lookup failures visible and raises incomplete-analysis risk', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') throw new Error('backend unavailable');
+        return '';
+      },
+    };
+
+    const report = await new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff: authDiff,
+    });
+
+    expect(report.riskSignals).toContainEqual(expect.objectContaining({
+      code: 'graph-analysis-incomplete',
+    }));
+    expect(report.summary.riskLevel).not.toBe('low');
+    expect(report.markdown).toContain('## Analysis warnings');
+    expect(report.markdown).toContain('src/auth.ts: symbol-lookup-failed');
+    expect(report.markdown).not.toContain('- No changed symbols were mapped.\n\n## Changed symbols');
+  });
+
   it('reports omitted symbols and distinguishes changed tests from linked tests', async () => {
     const graph = {
       async callText(name: string): Promise<string> {
@@ -348,7 +400,11 @@ diff --git a/tests/value.test.ts b/tests/value.test.ts
   });
 
   it('does not require test changes for documentation-only diffs', async () => {
-    const graph = { async callText(): Promise<string> { return ''; } };
+    const graph = {
+      async callText(): Promise<string> {
+        throw new Error('non-source files must not query CodeGraph');
+      },
+    };
     const diff = `diff --git a/README.md b/README.md
 --- a/README.md
 +++ b/README.md
@@ -360,6 +416,7 @@ diff --git a/tests/value.test.ts b/tests/value.test.ts
     const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
 
     expect(report.riskSignals.map((signal) => signal.code)).not.toContain('tests-unchanged');
+    expect(report.riskSignals.map((signal) => signal.code)).not.toContain('graph-analysis-incomplete');
   });
 
   it('does not classify protocol schema constants as sensitive symbols', async () => {
@@ -387,4 +444,31 @@ diff --git a/tests/value.test.ts b/tests/value.test.ts
     expect(report.reviewItems[0]?.risk.reasons.map((reason) => reason.code))
       .not.toContain('sensitive-symbol');
   });
+
+  it.each(['runMigration', 'rotateCredentials', 'updatePermissions', 'signPayload'])(
+    'classifies the domain symbol %s as sensitive',
+    async (symbol) => {
+      const graph = {
+        async callText(name: string): Promise<string> {
+          if (name === 'codegraph_node') return `- \`${symbol}\` (function) — :1`;
+          if (name === 'codegraph_impact') {
+            return `**Impact: "${symbol}" affects 1 symbol**\n\n**src/service.ts:**\n${symbol}:1`;
+          }
+          return 'service context';
+        },
+      };
+      const diff = `diff --git a/src/service.ts b/src/service.ts
+--- a/src/service.ts
++++ b/src/service.ts
+@@ -1 +1 @@
+-export function ${symbol}() { return false }
++export function ${symbol}() { return true }
+`;
+
+      const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+      expect(report.reviewItems[0]?.risk.reasons.map((reason) => reason.code))
+        .toContain('sensitive-symbol');
+    },
+  );
 });

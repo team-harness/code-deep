@@ -27,6 +27,17 @@ describe('code-intel MCP server', () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual(['explore', 'review']);
+    expect(tools.tools[0]?.description).toContain('task goal');
+    expect(tools.tools[0]?.inputSchema.properties?.projectPath?.description)
+      .toContain('absolute Git root');
+    expect(tools.tools[1]?.description).toContain('descending risk order');
+    expect(tools.tools[1]?.outputSchema).toMatchObject({
+      type: 'object',
+      required: expect.arrayContaining([
+        'schemaVersion', 'summary', 'files', 'impacts', 'reviewItems',
+        'riskSignals', 'graphContext', 'markdown',
+      ]),
+    });
 
     const result = await client.callTool({
       name: 'explore',
