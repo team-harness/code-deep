@@ -12,7 +12,18 @@ import {
 } from './graph-adapter.js';
 
 const exec = promisify(execFile);
-const SOURCE_PATH = /\.(?:[cm]?[jt]sx?|pyi?|go|rs|java|kts?|swift|cs|php|rb|c|h|cc|cpp|cxx|hpp|scala|dart|lua|r|sol|sql|tf|nix|exs?|erl|hrl|fsx?|vb|vue|svelte|astro|sh)$/i;
+const PRODUCTION_SOURCE_PATH = /\.(?:[cm]?[jt]sx?|pyi?|go|rs|java|kts?|swift|cs|php|rb|c|h|cc|cpp|cxx|hpp|scala|dart|lua|r|sol|sql|tf|nix|exs?|erl|hrl|fsx?|vb|vue|svelte|astro|sh)$/i;
+// Mirrors the built-in extension map in the exact CodeGraph dependency version.
+const CODEGRAPH_SOURCE_EXTENSIONS = new Set([
+  '.ts', '.tsx', '.mts', '.cts', '.ets', '.js', '.mjs', '.cjs', '.xsjs', '.xsjslib',
+  '.jsx', '.py', '.pyw', '.go', '.rs', '.java', '.c', '.h', '.cpp', '.cc', '.cxx',
+  '.hpp', '.hxx', '.cs', '.cshtml', '.razor', '.php', '.module', '.install', '.theme',
+  '.inc', '.yml', '.yaml', '.twig', '.rb', '.rake', '.swift', '.kt', '.kts', '.dart',
+  '.liquid', '.svelte', '.vue', '.astro', '.r', '.pas', '.dpr', '.dpk', '.lpr', '.dfm',
+  '.fmx', '.scala', '.sc', '.lua', '.luau', '.m', '.mm', '.sol', '.cfc', '.cfm', '.cfs',
+  '.metal', '.cu', '.cuh', '.nix', '.xml', '.cbl', '.cob', '.cobol', '.cpy', '.vb',
+  '.erl', '.hrl', '.escript', '.properties', '.tf', '.tfvars', '.tofu',
+]);
 const NON_SENSITIVE_SYMBOLS = new Set(['GRAPH_ADAPTER_SCHEMA_VERSION']);
 
 export type { GraphReader } from './graph-adapter.js';
@@ -128,8 +139,10 @@ export class ReviewAnalyzer {
   }
 
   async analyze(request: ReviewRequest): Promise<ReviewReport> {
+    validateReviewRequest(request);
     const diff = request.diff ?? await readGitDiff(request);
     const parsed = parseDiff(diff);
+    const graphExtensionOverrides = await loadCodeGraphExtensionOverrides(request.projectPath);
     const riskFiles = parsed.flatMap((file) => {
       const path = reviewPath(file);
       return path ? [{
@@ -154,7 +167,7 @@ export class ReviewAnalyzer {
       let symbols: ReviewSymbol[] = [];
       let graphConfidence: ReviewConfidence = 'low';
       let graphWarnings: string[] = [];
-      if (isSourcePath(path)) {
+      if (isCodeGraphSourcePath(path, graphExtensionOverrides)) {
         try {
           const catalog = await this.graph.getSymbols(path, request.projectPath);
           graphSummary = catalog.rawText;
@@ -230,7 +243,9 @@ export class ReviewAnalyzer {
 
     const queryTerms = changedSymbols.length
       ? changedSymbols.map((item) => item.symbol.name)
-      : files.filter((file) => isSourcePath(file.path)).map((file) => file.path);
+      : files
+        .filter((file) => isCodeGraphSourcePath(file.path, graphExtensionOverrides))
+        .map((file) => file.path);
     let graphContext = '';
     if (queryTerms.length) {
       try {
@@ -300,9 +315,6 @@ export class ReviewAnalyzer {
 }
 
 async function readGitDiff(request: ReviewRequest): Promise<string> {
-  if (request.head && !request.base) {
-    throw new Error('ReviewRequest.head requires ReviewRequest.base');
-  }
   const execOptions = {
     cwd: request.projectPath,
     encoding: 'utf8' as const,
@@ -638,7 +650,7 @@ export function scoreRisk(
 
   const testPath = /(?:^|\/)(?:__tests__|tests?|specs?)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i;
   const sourceChanged = files.some((file) =>
-    isSourcePath(file.path) && !testPath.test(file.path),
+    isProductionSourcePath(file.path) && !testPath.test(file.path),
   );
   const testsChanged = files.some((file) => testPath.test(file.path));
   if (sourceChanged && !testsChanged) {
@@ -699,8 +711,64 @@ export function scoreRisk(
   return signals;
 }
 
-function isSourcePath(path: string): boolean {
-  return SOURCE_PATH.test(path);
+function isProductionSourcePath(path: string): boolean {
+  return PRODUCTION_SOURCE_PATH.test(path);
+}
+
+function isCodeGraphSourcePath(path: string, overrides: Set<string>): boolean {
+  const normalized = path.toLowerCase();
+  if (
+    normalized === 'conf/routes'
+    || normalized.endsWith('/conf/routes')
+    || normalized.endsWith('.routes')
+    || /\.app(?:\.src)?$/.test(normalized)
+    || /(?:^|\/)(?:templates|sections)\/.+\.json$/.test(normalized)
+  ) {
+    return true;
+  }
+  const dot = normalized.lastIndexOf('.');
+  if (dot === -1) return false;
+  const extension = normalized.slice(dot);
+  return CODEGRAPH_SOURCE_EXTENSIONS.has(extension) || overrides.has(extension);
+}
+
+async function loadCodeGraphExtensionOverrides(projectPath: string): Promise<Set<string>> {
+  try {
+    const raw = await readFile(join(projectPath, 'codegraph.json'), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.extensions)) return new Set();
+    const extensions = new Set<string>();
+    for (const [rawExtension, language] of Object.entries(parsed.extensions)) {
+      if (typeof language !== 'string') continue;
+      let extension = rawExtension.trim().toLowerCase();
+      if (!extension.startsWith('.')) extension = `.${extension}`;
+      if (extension.length > 1 && !extension.slice(1).includes('.') && !/[\\/]/.test(extension)) {
+        extensions.add(extension);
+      }
+    }
+    return extensions;
+  } catch {
+    return new Set();
+  }
+}
+
+function validateReviewRequest(request: ReviewRequest): void {
+  if (request.base !== undefined && !request.base.trim()) {
+    throw new Error('base must not be empty');
+  }
+  if (request.head !== undefined && !request.head.trim()) {
+    throw new Error('head must not be empty');
+  }
+  if (request.head !== undefined && request.base === undefined) {
+    throw new Error('head requires base');
+  }
+  if (request.diff !== undefined && (request.base !== undefined || request.head !== undefined)) {
+    throw new Error('diff cannot be combined with base or head');
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function riskLevel(score: number): RiskLevel {

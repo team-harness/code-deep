@@ -19,8 +19,8 @@ const ExploreInput = z.object({
 const ReviewInput = z.object({
   projectPath: z.string().min(1).optional(),
   diff: z.string().optional(),
-  base: z.string().min(1).optional(),
-  head: z.string().min(1).optional(),
+  base: z.string().trim().min(1).optional(),
+  head: z.string().trim().min(1).optional(),
   maxFiles: z.number().int().min(1).max(100).optional(),
   maxSymbols: z.number().int().min(1).max(50).optional(),
 });
@@ -126,12 +126,17 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         projectPath: { type: 'string', description: 'Absolute Git root. Use the same projectPath supplied to explore.' },
-        diff: { type: 'string', description: 'Unified diff. Omit to read the current Git working tree.' },
+        diff: { type: 'string', description: 'Caller-supplied unified diff. Cannot be combined with base or head; omit to read Git.' },
         base: { type: 'string', description: 'Git base revision. Omit for the current working tree.' },
         head: { type: 'string', description: 'Git head revision; requires base and defaults to HEAD.' },
         maxFiles: { type: 'number', minimum: 1, maximum: 100, default: 20 },
         maxSymbols: { type: 'number', minimum: 1, maximum: 50, default: 12 },
       },
+      allOf: [
+        { not: { required: ['diff', 'base'] } },
+        { not: { required: ['diff', 'head'] } },
+        { if: { required: ['head'] }, then: { required: ['base'] } },
+      ],
       additionalProperties: false,
     },
     outputSchema: REVIEW_OUTPUT_SCHEMA,

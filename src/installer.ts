@@ -8,6 +8,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { parse as parseToml } from 'smol-toml';
 
 export type InstallTarget = 'codex' | 'claude';
 export type InstallAction = 'created' | 'updated' | 'unchanged';
@@ -139,11 +140,18 @@ function upsertTomlTable(content: string, block: string): string {
   if (headerIndexes.length > 1) {
     throw new Error('Cannot safely update Codex config: code-intel MCP table is declared more than once');
   }
+  const parsed = parseTomlConfig(content);
+  const mcpServers = parsed.mcp_servers;
+  if (mcpServers !== undefined && !isRecord(mcpServers)) {
+    throw new Error('Cannot safely update Codex config: mcp_servers is not a TOML table');
+  }
+  const hasSemanticEntry = isRecord(mcpServers)
+    && Object.prototype.hasOwnProperty.call(mcpServers, 'code-intel');
   const headerIndex = headerIndexes[0] ?? -1;
+  if (hasSemanticEntry && headerIndex === -1) {
+    throw new Error('Cannot safely update Codex config: code-intel MCP uses an inline or dotted representation');
+  }
   if (headerIndex === -1) {
-    if (lines.some((line) => isCodeIntelDottedAssignment(line))) {
-      throw new Error('Cannot safely update Codex config: code-intel MCP uses dotted assignments instead of a table');
-    }
     const trimmed = content.trimEnd();
     return `${trimmed}${trimmed ? '\n\n' : ''}${block}\n`;
   }
@@ -162,16 +170,20 @@ const TOML_CODE_INTEL_KEY = String.raw`(?:code-intel|"code-intel"|'code-intel')`
 const CODE_INTEL_TABLE_PATTERN = new RegExp(
   String.raw`^\s*\[\s*${TOML_MCP_KEY}\s*\.\s*${TOML_CODE_INTEL_KEY}\s*\]\s*(?:#.*)?(?:\r?\n)?$`,
 );
-const CODE_INTEL_DOTTED_ASSIGNMENT_PATTERN = new RegExp(
-  String.raw`^\s*${TOML_MCP_KEY}\s*\.\s*${TOML_CODE_INTEL_KEY}(?:\s*\.|\s*=)`,
-);
 
 function isCodeIntelTomlHeader(line: string): boolean {
   return CODE_INTEL_TABLE_PATTERN.test(line);
 }
 
-function isCodeIntelDottedAssignment(line: string): boolean {
-  return CODE_INTEL_DOTTED_ASSIGNMENT_PATTERN.test(line);
+function parseTomlConfig(content: string): Record<string, unknown> {
+  try {
+    const parsed = parseToml(content) as unknown;
+    if (!isRecord(parsed)) throw new Error('top-level value is not a table');
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot parse Codex config TOML: ${message}`);
+  }
 }
 
 function upsertInstructions(content: string | null): string {

@@ -104,6 +104,23 @@ describe('code-intel installer', () => {
     expect(await readFile(configPath, 'utf8')).toBe(duplicated);
   });
 
+  it.each([
+    ['parent inline', '[mcp_servers]\n"code-intel" = { command = "old" }\n'],
+    ['parent dotted', '[mcp_servers]\n"code-intel".command = "old"\n'],
+    ['root inline', 'mcp_servers = { "code-intel" = { command = "old" } }\n'],
+    ['root dotted', 'mcp_servers."code-intel".command = "old"\n'],
+  ])('refuses the %s code-intel TOML representation', async (_name, existing) => {
+    const homeDir = await makeHome();
+    const codexDir = join(homeDir, '.codex');
+    await mkdir(codexDir, { recursive: true });
+    const configPath = join(codexDir, 'config.toml');
+    await writeFile(configPath, existing);
+
+    await expect(installCodeIntel({ homeDir, targets: ['codex'] }))
+      .rejects.toThrow('inline or dotted representation');
+    expect(await readFile(configPath, 'utf8')).toBe(existing);
+  });
+
   it('installs Claude MCP, permissions, and instructions while preserving siblings', async () => {
     const homeDir = await makeHome();
     const claudeDir = join(homeDir, '.claude');

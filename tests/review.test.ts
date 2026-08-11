@@ -221,6 +221,97 @@ new file mode 100644
     ]);
   });
 
+  it.each(['pas', 'liquid', 'luau', 'cfc', 'cob', 'tfvars'])(
+    'queries CodeGraph for bundled backend extension .%s',
+    async (extension) => {
+      const calls: string[] = [];
+      const path = `src/example.${extension}`;
+      const graph = {
+        async callText(name: string): Promise<string> {
+          calls.push(name);
+          if (name === 'codegraph_node') return '- `Calculate` (function) — :1';
+          if (name === 'codegraph_impact') {
+            return `**Impact: "Calculate" affects 1 symbol**\n\n**${path}:**\nCalculate:1`;
+          }
+          return 'focused context';
+        },
+      };
+      const diff = `diff --git a/${path} b/${path}
+--- a/${path}
++++ b/${path}
+@@ -1 +1 @@
+-function Calculate: Integer; begin Result := 1; end;
++function Calculate: Integer; begin Result := 2; end;
+`;
+
+      const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+      expect(calls).toEqual(['codegraph_node', 'codegraph_impact', 'codegraph_explore']);
+      expect(report.files[0]?.symbols).toEqual([
+        { name: 'Calculate', kind: 'function', line: 1 },
+      ]);
+      expect(report.summary.riskScore).toBeGreaterThan(0);
+    },
+  );
+
+  it('queries CodeGraph for project-defined custom extensions', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'code-intel-custom-extension-'));
+    const calls: string[] = [];
+    const graph = {
+      async callText(name: string): Promise<string> {
+        calls.push(name);
+        if (name === 'codegraph_node') return '- `render` (function) — :1';
+        if (name === 'codegraph_impact') return '';
+        return 'template context';
+      },
+    };
+    const diff = `diff --git a/views/page.tpl b/views/page.tpl
+--- a/views/page.tpl
++++ b/views/page.tpl
+@@ -1 +1 @@
+-render('old')
++render('new')
+`;
+
+    try {
+      await writeFile(join(repo, 'codegraph.json'), JSON.stringify({
+        extensions: { '.tpl': 'php' },
+      }));
+      await new ReviewAnalyzer(graph).analyze({ projectPath: repo, diff });
+
+      expect(calls).toEqual(['codegraph_node', 'codegraph_impact', 'codegraph_explore']);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects ambiguous diff and Git range inputs before graph analysis', async () => {
+    const graph = {
+      async callText(): Promise<string> {
+        throw new Error('graph must not be called');
+      },
+    };
+
+    await expect(new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff: authDiff,
+      base: 'main',
+      head: 'HEAD',
+    })).rejects.toThrow('diff cannot be combined with base or head');
+
+    await expect(new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff: authDiff,
+      head: 'HEAD',
+    })).rejects.toThrow('head requires base');
+
+    await expect(new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      base: '   ',
+      head: 'HEAD',
+    })).rejects.toThrow('base must not be empty');
+  });
+
   it.runIf(process.platform !== 'win32')('does not follow untracked symlinks outside the repository', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'code-intel-symlink-repo-'));
     const outside = await mkdtemp(join(tmpdir(), 'code-intel-symlink-outside-'));

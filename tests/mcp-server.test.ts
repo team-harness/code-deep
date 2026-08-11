@@ -114,4 +114,36 @@ describe('code-intel MCP server', () => {
       text: expect.stringContaining('## Review priorities'),
     }));
   });
+
+  it('rejects a caller-supplied diff combined with a Git range', async () => {
+    const calls: string[] = [];
+    const bridge = {
+      async callText(name: string): Promise<string> {
+        calls.push(name);
+        return '';
+      },
+    };
+    const server = createCodeIntelServer({ projectPath: '/repo', bridge });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: 'review',
+      arguments: {
+        diff: 'diff --git a/a.ts b/a.ts',
+        base: 'main',
+        head: 'HEAD',
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('diff cannot be combined with base or head'),
+    }));
+    expect(calls).toEqual([]);
+  });
 });

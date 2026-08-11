@@ -75,7 +75,9 @@ Get the structured report:
 code-intel review /path/to/project --json
 ```
 
-The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied unified `diff`. With no diff or range it reviews the target project's current working tree.
+The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied
+unified `diff`. These modes are mutually exclusive, and `head` always requires
+`base`. With no diff or range it reviews the target project's current working tree.
 
 ## Process diagnostics
 
