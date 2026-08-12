@@ -84,7 +84,7 @@ data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
 `code-intel` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-intel@1.5.5`.
+command through `npx -y @team-harness/code-intel@1.5.6`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents
