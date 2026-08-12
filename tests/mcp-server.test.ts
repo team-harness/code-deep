@@ -55,7 +55,7 @@ describe('code-intel MCP server', () => {
       type: 'object',
       required: expect.arrayContaining([
         'schemaVersion', 'detailLevel', 'summary', 'files', 'reviewItems',
-        'reviewItemsOmitted', 'riskSignals',
+        'reviewItemsOmitted', 'riskSignals', 'ignoredPaths',
       ]),
     });
     expect(tools.tools[1]?.outputSchema?.required).not.toContain('markdown');
@@ -125,10 +125,12 @@ describe('code-intel MCP server', () => {
       detailLevel: string;
       reviewItems: Array<Record<string, unknown>>;
       files: Array<Record<string, unknown>>;
+      ignoredPaths: string[];
     };
 
     expect(structured.schemaVersion).toBe(2);
     expect(structured.detailLevel).toBe('minimal');
+    expect(structured.ignoredPaths).toEqual([]);
     expect(structured.reviewItems).toEqual([
       expect.objectContaining({
         id: 'src/auth.ts:login:1',

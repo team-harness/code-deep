@@ -127,6 +127,7 @@ export interface ReviewReport {
   impacts: SymbolImpact[];
   reviewItems: ReviewItem[];
   riskSignals: RiskSignal[];
+  ignoredPaths: string[];
   graphContext: string;
   markdown: string;
 }
@@ -140,7 +141,9 @@ export class ReviewAnalyzer {
 
   async analyze(request: ReviewRequest): Promise<ReviewReport> {
     validateReviewRequest(request);
-    const diff = request.diff ?? await readGitDiff(request);
+    const { diff, ignoredPaths } = request.diff === undefined
+      ? await readGitDiff(request)
+      : { diff: request.diff, ignoredPaths: [] };
     const parsed = parseDiff(diff);
     const graphExtensionOverrides = await loadCodeGraphExtensionOverrides(request.projectPath);
     const riskFiles = parsed.flatMap((file) => {
@@ -308,6 +311,7 @@ export class ReviewAnalyzer {
       impacts,
       reviewItems,
       riskSignals,
+      ignoredPaths,
       graphContext,
       markdown: '',
     };
@@ -316,7 +320,9 @@ export class ReviewAnalyzer {
   }
 }
 
-async function readGitDiff(request: ReviewRequest): Promise<string> {
+async function readGitDiff(
+  request: ReviewRequest,
+): Promise<{ diff: string; ignoredPaths: string[] }> {
   const execOptions = {
     cwd: request.projectPath,
     encoding: 'utf8' as const,
@@ -355,24 +361,37 @@ async function readGitDiff(request: ReviewRequest): Promise<string> {
         ));
       }
     }
-    if (request.base) return stdout;
+    if (request.base) return { diff: stdout, ignoredPaths: [] };
 
     const { stdout: untrackedOutput } = await exec(
       'git',
       ['ls-files', '--others', '--exclude-standard', '-z'],
       execOptions,
     );
-    const untrackedPaths = untrackedOutput.split('\0').filter(Boolean);
+    const ignoredPaths: string[] = [];
+    const untrackedPaths = untrackedOutput.split('\0').filter(Boolean).filter((path) => {
+      if (!isCodeIntelGeneratedPath(path)) return true;
+      ignoredPaths.push(path);
+      return false;
+    });
     const untrackedDiffs = await Promise.all(
       untrackedPaths.map((path) => untrackedFileDiff(request.projectPath, path)),
     );
-    return [stdout, ...untrackedDiffs].filter(Boolean).join('\n');
+    return {
+      diff: [stdout, ...untrackedDiffs].filter(Boolean).join('\n'),
+      ignoredPaths,
+    };
   } catch (error) {
     throw new Error(
       `Unable to read Git diff in ${request.projectPath}: ${errorMessage(error)}`,
       { cause: error },
     );
   }
+}
+
+function isCodeIntelGeneratedPath(path: string): boolean {
+  const normalized = path.replaceAll('\\', '/').replace(/^\.\//, '');
+  return normalized === '.codegraph/.gitignore';
 }
 
 async function untrackedFileDiff(projectPath: string, path: string): Promise<string> {
@@ -891,28 +910,30 @@ export function renderReviewMarkdown(
   }
   if (detailLevel === 'minimal') return lines.join('\n');
 
-  lines.push(
-    '',
-    '## Changed symbols',
-    '',
-  );
-  for (const file of report.files) {
-    const symbols = file.symbols.length
-      ? file.symbols.map((symbol) => `${symbol.name}:${symbol.line}`).join(', ')
-      : isDocumentationPath(file.path) ? 'documentation; symbol mapping not applicable' : 'no mapped symbol';
-    lines.push(`- ${file.path}: ${symbols}`);
-  }
-  lines.push('', '## Impact', '');
-  for (const impact of report.impacts) {
-    lines.push(`- ${impact.symbol} (${impact.file}): ${impact.affectedCount} affected symbols`);
-  }
-  lines.push('', '## Diff', '');
-  for (const file of report.files) {
-    if (!file.patch) continue;
-    lines.push(`### ${file.path}`, '', '~~~diff', file.patch, '~~~', '');
-  }
-  if (report.graphContext) {
-    lines.push('## CodeGraph context', '', report.graphContext);
+  if (report.files.length) {
+    lines.push(
+      '',
+      '## Changed symbols',
+      '',
+    );
+    for (const file of report.files) {
+      const symbols = file.symbols.length
+        ? file.symbols.map((symbol) => `${symbol.name}:${symbol.line}`).join(', ')
+        : isDocumentationPath(file.path) ? 'documentation; symbol mapping not applicable' : 'no mapped symbol';
+      lines.push(`- ${file.path}: ${symbols}`);
+    }
+    lines.push('', '## Impact', '');
+    for (const impact of report.impacts) {
+      lines.push(`- ${impact.symbol} (${impact.file}): ${impact.affectedCount} affected symbols`);
+    }
+    lines.push('', '## Diff', '');
+    for (const file of report.files) {
+      if (!file.patch) continue;
+      lines.push(`### ${file.path}`, '', '~~~diff', file.patch, '~~~', '');
+    }
+    if (report.graphContext) {
+      lines.push('## CodeGraph context', '', report.graphContext);
+    }
   }
   return lines.join('\n');
 }

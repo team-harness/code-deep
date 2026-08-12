@@ -137,11 +137,16 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
       description: 'Explainable global risk contributions, including truncation and incomplete graph analysis.',
       items: { type: 'object' },
     },
+    ignoredPaths: {
+      type: 'array',
+      description: 'Tool-generated working-tree paths excluded from an implicit review. Empty for caller-supplied diffs and Git ranges.',
+      items: { type: 'string' },
+    },
     graphContext: { type: 'string', description: 'Focused CodeGraph exploration context.' },
   },
   required: [
     'schemaVersion', 'detailLevel', 'summary', 'files', 'reviewItems',
-    'reviewItemsOmitted', 'riskSignals',
+    'reviewItemsOmitted', 'riskSignals', 'ignoredPaths',
   ],
   additionalProperties: true,
 };

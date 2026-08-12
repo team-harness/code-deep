@@ -84,7 +84,7 @@ data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
 `code-intel` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-intel@1.5.6`.
+command through `npx -y @team-harness/code-intel@1.5.9`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents
@@ -168,6 +168,8 @@ Risk scores are deterministic and explainable. Signals currently cover sensitive
 Cross-boundary scoring requires a confidently parsed impact and a non-low-confidence symbol mapping. Boundaries are conservatively recognized at workspace roots such as `apps/`, `packages/`, `services/`, `modules/`, and `libs/`, or by the first domain below `src/`. The current backend does not expose structured critical-flow evidence, so code-intel does not infer `critical-flow` from display text.
 
 Every core report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
+report also exposes `ignoredPaths` for tool-generated files excluded from an implicit
+working-tree review; caller-supplied diffs and Git ranges leave it empty. Each
 item represents one changed symbol and includes normalized impact symbols,
 related test files, mapping and impact confidence, parser warnings, and the exact
 reasons contributing to its per-symbol risk score. CLI JSON and library reports

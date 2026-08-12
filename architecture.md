@@ -120,7 +120,7 @@ flowchart TD
 
 ### 索引初始化与刷新
 
-`code-intel init [path]` 是唯一显式索引入口；其他命令不会隐式创建 `.codegraph`。
+`code-intel init [path]` 是显式索引入口；首次 `explore` 或 `review` 也会在 Git 仓库中自动创建缺失的 `.codegraph`，后续调用复用已有索引。
 
 1. [`initializeProjectIndex`](src/project-index.ts) 从请求路径向上查找 `.git`，将最近的 Git 边界作为仓库根；worktree 中的 `.git` 文件同样有效。
 2. 它继续向上查找已有的 `.codegraph` 目录，但不会越过仓库根，因此不会误用相邻或父仓库的索引。
@@ -167,6 +167,7 @@ flowchart TD
 
 - `diff` 与 `base`/`head` 互斥，`head` 必须配合 `base`；校验发生在任何图调用之前。
 - 未提供 diff 时，range 模式使用三点 Git diff；工作树模式合并 `HEAD` diff 和未跟踪文件。仓库尚无首个 commit 时也能审查未跟踪文件。
+- 隐式工作树采集会排除 code-intel 自动初始化生成的 `.codegraph/.gitignore`，并通过 `ignoredPaths` 显式记录；caller-supplied diff 和 range 不应用该过滤。
 - `maxFiles` 和 `maxSymbols` 只限制昂贵的图分析。全局风险始终基于完整 diff，报告通过 `filesOmitted` 和 `symbolsOmitted` 显式暴露截断。
 - 变更行映射到同文件中最近的前置符号；`mappingConfidence` 表达这种启发式映射的可靠度。
 - `CodeGraphAdapter` 分别调用 `codegraph_node`、`codegraph_impact` 和 `codegraph_explore`。影响结果中的测试文件用于生成 `linked`、`changed`、`missing` 或 `unknown` 测试状态。
@@ -236,7 +237,7 @@ type CodeGraphCommandRunner = (
 
 | 状态位置 | 所有者 | code-intel 行为 |
 | --- | --- | --- |
-| `<root>/.codegraph` | CodeGraph | 仅在显式 `code-intel init` 时触发创建或刷新；explore/review 消费其索引 |
+| `<root>/.codegraph` | CodeGraph | 显式 `code-intel init` 或首次 `explore`/`review` 触发创建或刷新；工作树 review 不把 code-intel 自动生成的 `.codegraph/.gitignore` 当作用户改动 |
 | `~/.codegraph/daemons/*.json` | CodeGraph | `ps` 只读 registry，并与实时进程和 socket 路径存在性证据合并；不执行连接探测 |
 | Codex/Claude 用户配置 | 用户，由 installer 协助维护 | `install` 执行幂等更新、备份和原子 rename |
 | `codegraph.json` | 项目 | review 只读取 `extensions` 覆盖；缺失或格式错误时忽略覆盖 |
@@ -304,7 +305,7 @@ type CodeGraphCommandRunner = (
 | [`tests/process-report.test.ts`](tests/process-report.test.ts) | 跨角色进程分类、孤儿证据和只读 stale metadata |
 | [`tests/version.test.ts`](tests/version.test.ts) | wrapper 与 CodeGraph 版本独立跟踪 |
 
-当前文档生成基线执行了 `npm test`（9 个测试文件、53 个测试通过）和 `npm run typecheck`。仍有两个重要覆盖缺口：
+当前文档生成基线执行 `npm test`（9 个测试文件；测试数量以当前 Vitest 输出为准）和 `npm run typecheck`。仍有两个重要覆盖缺口：
 
 1. [`src/cli.ts`](src/cli.ts) 没有直接测试，command wiring、文本/JSON 输出以及 `SIGINT`/`SIGTERM` 关闭只由源码核验。
 2. 测试使用 fake server 或内联 stub，没有针对真实 `@colbymchenry/codegraph` 的端到端契约测试；扩展名镜像和文本解析器因此仍与固定后端版本存在约定耦合。

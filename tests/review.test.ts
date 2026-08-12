@@ -340,6 +340,63 @@ ${added}
     }
   });
 
+  it('excludes auto-generated .codegraph files from implicit working-tree review', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'code-intel-index-pollution-'));
+    const graph = { async callText(): Promise<string> { return ''; } };
+
+    try {
+      await exec('git', ['init', '-b', 'main'], { cwd: repo });
+      await mkdir(join(repo, '.codegraph'), { recursive: true });
+      await writeFile(join(repo, '.codegraph/.gitignore'), '# CodeGraph index\n');
+      await writeFile(join(repo, 'notes.md'), '# User change\n');
+
+      const report = await new ReviewAnalyzer(graph).analyze({ projectPath: repo });
+
+      expect(report.files.map((file) => file.path)).toEqual(['notes.md']);
+      expect(report.summary.filesChanged).toBe(1);
+      expect(report.ignoredPaths).toEqual(['.codegraph/.gitignore']);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('renders a clean working tree without empty detail sections', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'code-intel-clean-review-'));
+    const graph = { async callText(): Promise<string> { return ''; } };
+
+    try {
+      await exec('git', ['init', '-b', 'main'], { cwd: repo });
+      const report = await new ReviewAnalyzer(graph).analyze({ projectPath: repo });
+
+      expect(report.summary.filesChanged).toBe(0);
+      expect(report.reviewItems).toEqual([]);
+      expect(report.markdown).not.toContain('## Changed symbols');
+      expect(report.markdown).not.toContain('## Impact');
+      expect(report.markdown).not.toContain('## Diff');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps caller-supplied diffs unchanged when they mention .codegraph', async () => {
+    const graph = { async callText(): Promise<string> { return ''; } };
+    const diff = `diff --git a/.codegraph/notes.txt b/.codegraph/notes.txt
+--- a/.codegraph/notes.txt
++++ b/.codegraph/notes.txt
+@@ -0,0 +1 @@
++caller supplied content
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({
+      projectPath: '/repo',
+      diff,
+    });
+
+    expect(report.files.map((file) => file.path)).toEqual(['.codegraph/notes.txt']);
+    expect(report.summary.filesChanged).toBe(1);
+    expect(report.ignoredPaths).toEqual([]);
+  });
+
   it('reviews an explicit Git base and head range', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'code-intel-range-'));
     const graph = {

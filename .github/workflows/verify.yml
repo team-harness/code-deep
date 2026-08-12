@@ -1,0 +1,51 @@
+name: Verify package
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Node ${{ matrix.node-version }} checks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  package-smoke:
+    name: Node 24 package smoke
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and install tarball
+        run: |
+          package_file=$(npm pack --silent)
+          smoke_dir=$(mktemp -d)
+          (cd "$smoke_dir" && npm init --yes >/dev/null)
+          npm install --prefix "$smoke_dir" "./$package_file"
+          (cd "$smoke_dir" && node --input-type=module -e "import('@team-harness/code-intel').then(({CodeIntelClient}) => { if (typeof CodeIntelClient !== 'function') process.exit(1); })")
+          "$smoke_dir/node_modules/.bin/code-intel" --help
+          test -x "$smoke_dir/node_modules/.bin/code-intel"
