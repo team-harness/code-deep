@@ -48,14 +48,8 @@ diagnose initialization failure.
 {
   "mcpServers": {
     "code-intel": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@team-harness/code-intel@1.5.5",
-        "mcp",
-        "--path",
-        "/absolute/path/to/project"
-      ]
+      "command": "code-intel",
+      "args": ["mcp", "--path", "/absolute/path/to/project"]
     }
   }
 }

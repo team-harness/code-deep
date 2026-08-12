@@ -32,8 +32,8 @@ export interface InstallCodeIntelOptions {
 const PACKAGE_SPEC = `@team-harness/code-intel@${CODE_INTEL_VERSION}`;
 const MCP_ENTRY = {
   type: 'stdio',
-  command: 'npx',
-  args: ['-y', PACKAGE_SPEC, 'mcp'],
+  command: 'code-intel',
+  args: ['mcp'],
 };
 
 const INSTRUCTIONS_START = '<!-- CODE_INTEL_START -->';
@@ -92,8 +92,8 @@ async function installCodex(homeDir: string): Promise<InstallFileResult[]> {
   const currentConfig = await readOptionalFile(configPath);
   const block = [
     '[mcp_servers.code-intel]',
-    'command = "npx"',
-    `args = ["-y", "${PACKAGE_SPEC}", "mcp"]`,
+    'command = "code-intel"',
+    'args = ["mcp"]',
   ].join('\n');
 
   return [

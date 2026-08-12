@@ -43,8 +43,8 @@ describe('code-intel installer', () => {
     const installedInstructions = await readFile(instructionsPath, 'utf8');
 
     expect(installedConfig).toContain(originalConfig.trimEnd());
-    expect(installedConfig).toContain('[mcp_servers.code-intel]\ncommand = "npx"');
-    expect(installedConfig).toContain(`args = ["-y", "${PACKAGE_SPEC}", "mcp"]`);
+    expect(installedConfig).toContain('[mcp_servers.code-intel]\ncommand = "code-intel"');
+    expect(installedConfig).toContain('args = ["mcp"]');
     expect(installedInstructions).toContain('<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->');
     expect(installedInstructions).toContain('<!-- CODE_INTEL_START -->');
     expect(installedInstructions).toContain('absolute Git root as `projectPath`');
@@ -90,8 +90,8 @@ describe('code-intel installer', () => {
 
     const installed = await readFile(configPath, 'utf8');
     expect(installed.match(/\[mcp_servers\.(?:code-intel|"code-intel")\]/g)).toHaveLength(1);
-    expect(installed).toContain('[mcp_servers.code-intel]\ncommand = "npx"');
-    expect(installed).toContain(`args = ["-y", "${PACKAGE_SPEC}", "mcp"]`);
+    expect(installed).toContain('[mcp_servers.code-intel]\ncommand = "code-intel"');
+    expect(installed).toContain('args = ["mcp"]');
     expect(installed).toContain('[mcp_servers.existing]\ncommand = "existing"');
   });
 
@@ -152,8 +152,8 @@ describe('code-intel installer', () => {
     expect(mcp.mcpServers.existing).toEqual({ command: 'keep' });
     expect(mcp.mcpServers['code-intel']).toEqual({
       type: 'stdio',
-      command: 'npx',
-      args: ['-y', PACKAGE_SPEC, 'mcp'],
+      command: 'code-intel',
+      args: ['mcp'],
     });
     expect(settings.permissions.allow).toEqual(['Bash(git status:*)', 'mcp__code-intel__*']);
     expect(instructions).toContain('<!-- CODE_INTEL_START -->');
