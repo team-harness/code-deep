@@ -52,6 +52,8 @@ describe('ReviewAnalyzer', () => {
       filesChanged: 1,
       additions: 2,
       deletions: 1,
+      riskScore: 50,
+      riskLevel: 'high',
     });
     expect(report.files[0]?.symbols).toEqual([
       { name: 'login', kind: 'function', line: 16 },
@@ -124,6 +126,185 @@ describe('ReviewAnalyzer', () => {
       'wide-impact',
     ]);
     expect(report.riskSignals.reduce((sum, signal) => sum + signal.score, 0)).toBe(60);
+  });
+
+  it('raises symbol and overall risk for high-confidence cross-boundary impact', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `submitOrder` (function) — :1';
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "submitOrder" affects 2 symbols**',
+            '',
+            '**src/orders/service.ts:**',
+            'submitOrder:1',
+            '',
+            '**src/billing/charge.ts:**',
+            'chargeCard:8',
+          ].join('\n');
+        }
+        return '';
+      },
+    };
+    const diff = `diff --git a/src/orders/service.ts b/src/orders/service.ts
+--- a/src/orders/service.ts
++++ b/src/orders/service.ts
+@@ -1 +1 @@
+-export const submitOrder = oldSubmit
++export const submitOrder = newSubmit
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.reviewItems[0]?.risk.reasons).toContainEqual(expect.objectContaining({
+      code: 'cross-boundary-impact',
+      score: 10,
+    }));
+    expect(report.reviewItems[0]?.risk.score).toBe(35);
+    expect(report.summary).toMatchObject({ riskScore: 35, riskLevel: 'medium' });
+  });
+
+  it('does not treat filenames below src/lib as structural boundaries', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `formatDate` (function) — :1';
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "formatDate" affects 2 symbols**',
+            '',
+            '**src/lib/formatDate.ts:**',
+            'formatDate:1',
+            '',
+            '**src/lib/parseDate.ts:**',
+            'parseDate:1',
+          ].join('\n');
+        }
+        return '';
+      },
+    };
+    const diff = `diff --git a/src/lib/formatDate.ts b/src/lib/formatDate.ts
+--- a/src/lib/formatDate.ts
++++ b/src/lib/formatDate.ts
+@@ -1 +1 @@
+-export const formatDate = oldFormat
++export const formatDate = newFormat
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.reviewItems[0]?.risk.reasons.map((reason) => reason.code))
+      .not.toContain('cross-boundary-impact');
+  });
+
+  it('preserves the project prefix when comparing src domain boundaries', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `loadCore` (function) — :1';
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "loadCore" affects 2 symbols**',
+            '',
+            '**frontend/src/core/load.ts:**',
+            'loadCore:1',
+            '',
+            '**backend/src/core/load.ts:**',
+            'loadCore:1',
+          ].join('\n');
+        }
+        return '';
+      },
+    };
+    const diff = `diff --git a/frontend/src/core/load.ts b/frontend/src/core/load.ts
+--- a/frontend/src/core/load.ts
++++ b/frontend/src/core/load.ts
+@@ -1 +1 @@
+-export const loadCore = oldLoad
++export const loadCore = newLoad
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.reviewItems[0]?.risk.reasons).toContainEqual(expect.objectContaining({
+      code: 'cross-boundary-impact',
+      message: expect.stringContaining('backend/src/core'),
+    }));
+  });
+
+  it('does not infer cross-boundary risk from medium-confidence display evidence', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `submitOrder` (function) — :1';
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "submitOrder" affects 3 symbols**',
+            '',
+            'Critical flow: checkout',
+            '',
+            '**src/orders/service.ts:**',
+            'submitOrder:1',
+            '',
+            '**src/billing/charge.ts:**',
+            'chargeCard:8',
+          ].join('\n');
+        }
+        return '';
+      },
+    };
+    const diff = `diff --git a/src/orders/service.ts b/src/orders/service.ts
+--- a/src/orders/service.ts
++++ b/src/orders/service.ts
+@@ -1 +1 @@
+-export const submitOrder = oldSubmit
++export const submitOrder = newSubmit
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+    const reasons = report.reviewItems[0]?.risk.reasons.map((reason) => reason.code);
+
+    expect(reasons).not.toContain('cross-boundary-impact');
+  });
+
+  it('bounds large documentation previews and gives a file-level review direction', async () => {
+    const graph = { async callText(): Promise<string> { return ''; } };
+    const added = Array.from({ length: 600 }, (_, index) => `+decision ${index + 1}`).join('\n');
+    const diff = `diff --git a/docs/design.md b/docs/design.md
+new file mode 100644
+--- /dev/null
++++ b/docs/design.md
+@@ -0,0 +1,600 @@
+${added}
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.summary).toMatchObject({ riskScore: 25, riskLevel: 'medium' });
+    expect(report.files[0]?.patch.length).toBeLessThanOrEqual(2_100);
+    expect(report.files[0]?.patch).toContain('diff truncated for this file');
+    expect(report.markdown).toContain('Review documentation directly');
+    expect(report.markdown).toContain('claims, links, examples, and acceptance criteria');
+  });
+
+  it('does not classify source files inside docs as documentation', async () => {
+    const graph = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') return '- `siteConfig` (constant) — :1';
+        if (name === 'codegraph_impact') return '**Impact: "siteConfig" affects 0 symbols**';
+        return '';
+      },
+    };
+    const added = Array.from({ length: 300 }, (_, index) => `+export const value${index} = ${index}`).join('\n');
+    const diff = `diff --git a/docs/.vitepress/config.ts b/docs/.vitepress/config.ts
+new file mode 100644
+--- /dev/null
++++ b/docs/.vitepress/config.ts
+@@ -0,0 +1,300 @@
+${added}
+`;
+
+    const report = await new ReviewAnalyzer(graph).analyze({ projectPath: '/repo', diff });
+
+    expect(report.files[0]?.patch.length).toBeGreaterThan(2_100);
+    expect(report.markdown).not.toContain('documentation; symbol mapping not applicable');
   });
 
   it('reviews tracked working-tree changes when no diff is supplied', async () => {

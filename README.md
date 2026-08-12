@@ -114,6 +114,11 @@ code-intel review /path/to/project --json
 The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied
 unified `diff`. These modes are mutually exclusive, and `head` always requires
 `base`. With no diff or range it reviews the target project's current working tree.
+It defaults to `detailLevel: "minimal"`, returning the risk summary, signals,
+compact changed-line ranges, and the top three review items without embedding
+the diff or graph context. `reviewItemsOmitted` makes any response-only
+truncation explicit. Use `detailLevel: "standard"` when the complete
+bounded diff, impact compatibility view, and graph context are needed.
 
 ## Process diagnostics
 
@@ -158,13 +163,16 @@ additionally share its own per-project daemon across MCP clients.
 
 ## Review semantics
 
-Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, diff size, file count, deleted files, and incomplete graph analysis. Global risk always uses metadata from the complete diff; `maxFiles` and `maxSymbols` limit only deep graph and patch analysis. Scores prioritize review effort; they are not claims that a bug exists.
+Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, high-confidence cross-boundary impact, diff size, file count, deleted files, and incomplete graph analysis. Overall risk is the higher of the global signal total and the highest per-symbol risk, so a locally high-risk symbol cannot be hidden by a low aggregate score. Global signals always use metadata from the complete diff; `maxFiles` and `maxSymbols` limit only deep graph and patch analysis. Scores prioritize review effort; they are not claims that a bug exists.
 
-Every report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
+Cross-boundary scoring requires a confidently parsed impact and a non-low-confidence symbol mapping. Boundaries are conservatively recognized at workspace roots such as `apps/`, `packages/`, `services/`, `modules/`, and `libs/`, or by the first domain below `src/`. The current backend does not expose structured critical-flow evidence, so code-intel does not infer `critical-flow` from display text.
+
+Every core report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
 item represents one changed symbol and includes normalized impact symbols,
 related test files, mapping and impact confidence, parser warnings, and the exact
-reasons contributing to its per-symbol risk score. Existing report fields remain
-available for compatibility.
+reasons contributing to its per-symbol risk score. CLI JSON and library reports
+retain the complete structure; MCP responses use `schemaVersion: 2`, expose the
+selected `detailLevel` and `reviewItemsOmitted`, and use compact changed-line ranges.
 
 ```ts
 const report = await codeIntel.review();

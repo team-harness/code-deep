@@ -7,7 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { GraphReader, ReviewReport } from './review.js';
-import { ReviewAnalyzer, validateReviewRequest } from './review.js';
+import { renderReviewMarkdown, ReviewAnalyzer, validateReviewRequest } from './review.js';
 import { ensureProjectIndex } from './project-index.js';
 import { CODE_INTEL_VERSION } from './version.js';
 
@@ -24,6 +24,7 @@ const ReviewInput = z.object({
   head: z.string().trim().min(1).optional(),
   maxFiles: z.number().int().min(1).max(100).optional(),
   maxSymbols: z.number().int().min(1).max(50).optional(),
+  detailLevel: z.enum(['minimal', 'standard']).default('minimal'),
 });
 
 const MAY_INITIALIZE_INDEX = {
@@ -40,6 +41,7 @@ const SERVER_INSTRUCTIONS = [
   'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace.',
   'Missing Git worktree indexes are initialized automatically before either tool runs.',
   'After changes use review for the working tree or a base/head range.',
+  'Review defaults to detailLevel minimal; request standard when you need the bounded diff, complete review items, impact compatibility view, or graph context.',
   'Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups.',
   'Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment.',
   'Both tools leave source files unchanged and share one persistent internal backend connection.',
@@ -49,7 +51,12 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
   type: 'object',
   description: 'Versioned review report. Read reviewItems in array order (highest risk first), then inspect warnings and truncation counters before making findings.',
   properties: {
-    schemaVersion: { type: 'number', const: 1 },
+    schemaVersion: { type: 'number', const: 2 },
+    detailLevel: {
+      type: 'string',
+      enum: ['minimal', 'standard'],
+      description: 'Response detail level selected by the caller.',
+    },
     summary: {
       type: 'object',
       description: 'Global diff totals and risk, including files/symbols omitted only from deep graph analysis.',
@@ -72,7 +79,7 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
     },
     reviewItems: {
       type: 'array',
-      description: 'Changed symbols sorted by descending risk. Verify each candidate against the diff and source before emitting a comment.',
+      description: 'Changed symbols sorted by descending risk. Minimal detail returns the top three and reports the remainder in reviewItemsOmitted.',
       items: {
         type: 'object',
         properties: {
@@ -91,10 +98,34 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
         additionalProperties: true,
       },
     },
+    reviewItemsOmitted: {
+      type: 'number',
+      description: 'Review items omitted only from this response projection; zero for standard detail.',
+    },
     files: {
       type: 'array',
-      description: 'Deeply analyzed changed files. Per-file graphWarnings identify symbol mapping degradation.',
-      items: { type: 'object' },
+      description: 'Deeply analyzed changed files. Changed lines are represented as compact inclusive ranges; per-file graphWarnings identify symbol mapping degradation.',
+      items: {
+        type: 'object',
+        properties: {
+          changedLineCount: { type: 'number' },
+          changedLineRanges: {
+            type: 'array',
+            description: 'Inclusive changed-line ranges sorted by start line.',
+            items: {
+              type: 'object',
+              properties: {
+                start: { type: 'number' },
+                end: { type: 'number' },
+              },
+              required: ['start', 'end'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['changedLineCount', 'changedLineRanges'],
+        additionalProperties: true,
+      },
     },
     impacts: {
       type: 'array',
@@ -107,11 +138,10 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
       items: { type: 'object' },
     },
     graphContext: { type: 'string', description: 'Focused CodeGraph exploration context.' },
-    markdown: { type: 'string', description: 'Human-readable rendering of this report.' },
   },
   required: [
-    'schemaVersion', 'summary', 'files', 'impacts', 'reviewItems',
-    'riskSignals', 'graphContext', 'markdown',
+    'schemaVersion', 'detailLevel', 'summary', 'files', 'reviewItems',
+    'reviewItemsOmitted', 'riskSignals',
   ],
   additionalProperties: true,
 };
@@ -144,6 +174,12 @@ const TOOLS: Tool[] = [
         head: { type: 'string', description: 'Git head revision; requires base and defaults to HEAD.' },
         maxFiles: { type: 'number', minimum: 1, maximum: 100, default: 20 },
         maxSymbols: { type: 'number', minimum: 1, maximum: 50, default: 12 },
+        detailLevel: {
+          type: 'string',
+          enum: ['minimal', 'standard'],
+          default: 'minimal',
+          description: 'minimal returns priorities and risk without diff/context; standard adds the complete report and bounded diff.',
+        },
       },
       allOf: [
         { not: { required: ['diff', 'base'] } },
@@ -189,14 +225,15 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
 
       if (request.params.name === 'review') {
         const input = ReviewInput.parse(request.params.arguments ?? {});
+        const { detailLevel, ...reviewInput } = input;
         const reviewRequest = {
-          ...input,
+          ...reviewInput,
           projectPath: input.projectPath ?? options.projectPath,
         };
         validateReviewRequest(reviewRequest);
         await indexEnsurer(options)(reviewRequest.projectPath);
         const report = await new ReviewAnalyzer(options.bridge).analyze(reviewRequest);
-        return reportResult(report);
+        return reportResult(report, detailLevel);
       }
 
       return errorResult(`Unknown tool: ${request.params.name}`);
@@ -220,11 +257,54 @@ function textResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-function reportResult(report: ReviewReport): CallToolResult {
+function reportResult(
+  report: ReviewReport,
+  detailLevel: 'minimal' | 'standard',
+): CallToolResult {
+  const { markdown: _markdown, ...structuredReport } = report;
+  const structuredContent = JSON.parse(JSON.stringify(structuredReport)) as Record<string, unknown>;
+  structuredContent.schemaVersion = 2;
+  structuredContent.detailLevel = detailLevel;
+  structuredContent.files = report.files.map(({
+    changedLines,
+    patch: _patch,
+    graphSummary: _graphSummary,
+    ...file
+  }) => ({
+    ...file,
+    changedLineCount: changedLines.length,
+    changedLineRanges: compactLineRanges(changedLines),
+  }));
+  if (detailLevel === 'minimal') {
+    delete structuredContent.impacts;
+    delete structuredContent.graphContext;
+    structuredContent.reviewItems = report.reviewItems.slice(0, 3);
+    structuredContent.reviewItemsOmitted = Math.max(0, report.reviewItems.length - 3);
+  } else {
+    structuredContent.reviewItemsOmitted = 0;
+  }
   return {
-    content: [{ type: 'text', text: report.markdown }],
-    structuredContent: JSON.parse(JSON.stringify(report)) as Record<string, unknown>,
+    content: [{
+      type: 'text',
+      text: detailLevel === 'minimal'
+        ? renderReviewMarkdown(report, { detailLevel })
+        : report.markdown,
+    }],
+    structuredContent,
   };
+}
+
+function compactLineRanges(lines: number[]): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const line of lines) {
+    const current = ranges.at(-1);
+    if (current && line <= current.end + 1) {
+      current.end = Math.max(current.end, line);
+    } else {
+      ranges.push({ start: line, end: line });
+    }
+  }
+  return ranges;
 }
 
 function errorResult(message: string): CallToolResult {

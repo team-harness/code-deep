@@ -190,7 +190,7 @@ export class ReviewAnalyzer {
         graphSummary,
         graphConfidence,
         graphWarnings,
-        patch: filePatch(file, patchBudget),
+        patch: filePatch(file, isDocumentationPath(path, graphExtensionOverrides) ? 2_000 : patchBudget),
       });
     }
 
@@ -283,10 +283,12 @@ export class ReviewAnalyzer {
         message: `${symbolsOmitted} mapped symbol${symbolsOmitted === 1 ? ' was' : 's were'} omitted by maxSymbols.`,
       });
     }
-    const riskScore = Math.min(
+    const globalRiskScore = Math.min(
       100,
       riskSignals.reduce((total, signal) => total + signal.score, 0),
     );
+    const highestItemRisk = Math.max(0, ...reviewItems.map((item) => item.risk.score));
+    const riskScore = Math.max(globalRiskScore, highestItemRisk);
     const summary = {
       filesChanged: parsed.length,
       filesAnalyzed: files.length,
@@ -542,6 +544,14 @@ function buildReviewItem(
       message: `${symbol.name} reaches ${impact.affectedCount} indexed symbols.`,
     });
   }
+  const crossedBoundaries = crossBoundaryTargets(filePath, impact);
+  if (mappingConfidence !== 'low' && impact.confidence === 'high' && crossedBoundaries.length) {
+    reasons.push({
+      code: 'cross-boundary-impact',
+      score: 10,
+      message: `${symbol.name} reaches ${crossedBoundaries.join(', ')} outside its source boundary.`,
+    });
+  }
   if (mappingConfidence === 'low') {
     reasons.push({
       code: 'mapping-uncertain',
@@ -578,6 +588,36 @@ function buildReviewItem(
       reasons,
     },
   };
+}
+
+function crossBoundaryTargets(filePath: string, impact: GraphImpact): string[] {
+  const sourceBoundary = structuralBoundary(filePath);
+  if (!sourceBoundary) return [];
+  return [...new Set(
+    impact.affectedSymbols
+      .filter((symbol) => !isTestPath(symbol.file))
+      .map((symbol) => structuralBoundary(symbol.file))
+      .filter((boundary): boundary is string => boundary !== null && boundary !== sourceBoundary),
+  )].sort();
+}
+
+function structuralBoundary(path: string): string | null {
+  const segments = path.replaceAll('\\', '/').replace(/^\.\//, '').split('/').filter(Boolean);
+  const sourceIndex = segments.findIndex((segment) => segment === 'src');
+  const workspaceIndex = segments.findIndex((segment) =>
+    /^(?:apps|packages|services|modules|libs)$/i.test(segment),
+  );
+  if (
+    workspaceIndex >= 0
+    && (sourceIndex === -1 || workspaceIndex < sourceIndex)
+    && segments[workspaceIndex + 2]
+  ) {
+    return `${segments[workspaceIndex]}/${segments[workspaceIndex + 1]}`;
+  }
+  if (sourceIndex >= 0 && segments[sourceIndex + 2]) {
+    return segments.slice(0, sourceIndex + 2).join('/');
+  }
+  return null;
 }
 
 function symbolMappingConfidence(
@@ -687,7 +727,7 @@ export function scoreRisk(
     0,
   );
   if (churn >= 500) {
-    signals.push({ code: 'large-change', score: 20, message: `${churn} changed lines increase review breadth.` });
+    signals.push({ code: 'large-change', score: 25, message: `${churn} changed lines require a broad review.` });
   } else if (churn >= 100) {
     signals.push({ code: 'large-change', score: 12, message: `${churn} changed lines increase review breadth.` });
   } else if (churn >= 30) {
@@ -713,6 +753,11 @@ export function scoreRisk(
 
 function isProductionSourcePath(path: string): boolean {
   return PRODUCTION_SOURCE_PATH.test(path);
+}
+
+function isDocumentationPath(path: string, overrides = new Set<string>()): boolean {
+  if (isCodeGraphSourcePath(path, overrides)) return false;
+  return /(?:^|\/)(?:docs?|\.codestable)(?:\/|$)|\.(?:md|mdx|rst|adoc|txt)$/i.test(path);
 }
 
 function isCodeGraphSourcePath(path: string, overrides: Set<string>): boolean {
@@ -778,7 +823,11 @@ function riskLevel(score: number): RiskLevel {
   return 'low';
 }
 
-export function renderReviewMarkdown(report: ReviewReport): string {
+export function renderReviewMarkdown(
+  report: ReviewReport,
+  options: { detailLevel?: 'minimal' | 'standard' } = {},
+): string {
+  const detailLevel = options.detailLevel ?? 'standard';
   const analysisWarnings = collectAnalysisWarnings(
     report.files,
     report.reviewItems,
@@ -800,7 +849,10 @@ export function renderReviewMarkdown(report: ReviewReport): string {
     '',
   ];
   if (report.reviewItems.length) {
-    for (const item of report.reviewItems) {
+    const reviewItems = detailLevel === 'minimal'
+      ? report.reviewItems.slice(0, 3)
+      : report.reviewItems;
+    for (const item of reviewItems) {
       const reasons = item.risk.reasons.length
         ? item.risk.reasons.map((reason) => reason.code).join(', ')
         : 'no elevated signals';
@@ -809,15 +861,36 @@ export function renderReviewMarkdown(report: ReviewReport): string {
         `  Tests: ${item.tests.status}; mapping: ${item.mappingConfidence}; impact: ${item.impact.affectedCount}; reasons: ${reasons}`,
       );
     }
+    const reviewItemsOmitted = detailLevel === 'minimal'
+      ? Math.max(0, report.reviewItems.length - reviewItems.length)
+      : 0;
+    if (reviewItemsOmitted) {
+      lines.push(`- ${reviewItemsOmitted} additional review items omitted; request detailLevel standard for the complete list.`);
+    }
   } else {
-    lines.push(analysisWarnings.length
-      ? '- No changed symbols were mapped because graph analysis was incomplete; inspect the warnings below.'
-      : '- No changed symbols were mapped.');
+    const documentationFiles = report.files
+      .filter((file) => isDocumentationPath(file.path))
+      .map((file) => file.path);
+    if (analysisWarnings.length) {
+      lines.push('- No changed symbols were mapped because graph analysis was incomplete; inspect the warnings below.');
+    } else if (documentationFiles.length) {
+      lines.push(`- Review documentation directly (${documentationFiles.join(', ')}): validate claims, links, examples, and acceptance criteria; symbol mapping does not apply.`);
+    } else {
+      lines.push('- Review changed files directly; no symbols were mapped for graph-based prioritization.');
+    }
   }
   if (analysisWarnings.length) {
     lines.push('', '## Analysis warnings', '');
     for (const warning of analysisWarnings) lines.push(`- ${warning}`);
   }
+  if (report.riskSignals.length) {
+    lines.push('', '## Risk signals', '');
+    for (const signal of report.riskSignals) {
+      lines.push(`- +${signal.score} ${signal.message}`);
+    }
+  }
+  if (detailLevel === 'minimal') return lines.join('\n');
+
   lines.push(
     '',
     '## Changed symbols',
@@ -826,14 +899,8 @@ export function renderReviewMarkdown(report: ReviewReport): string {
   for (const file of report.files) {
     const symbols = file.symbols.length
       ? file.symbols.map((symbol) => `${symbol.name}:${symbol.line}`).join(', ')
-      : 'no mapped symbol';
+      : isDocumentationPath(file.path) ? 'documentation; symbol mapping not applicable' : 'no mapped symbol';
     lines.push(`- ${file.path}: ${symbols}`);
-  }
-  if (report.riskSignals.length) {
-    lines.push('', '## Risk signals', '');
-    for (const signal of report.riskSignals) {
-      lines.push(`- +${signal.score} ${signal.message}`);
-    }
   }
   lines.push('', '## Impact', '');
   for (const impact of report.impacts) {

@@ -170,8 +170,8 @@ flowchart TD
 - `maxFiles` 和 `maxSymbols` 只限制昂贵的图分析。全局风险始终基于完整 diff，报告通过 `filesOmitted` 和 `symbolsOmitted` 显式暴露截断。
 - 变更行映射到同文件中最近的前置符号；`mappingConfidence` 表达这种启发式映射的可靠度。
 - `CodeGraphAdapter` 分别调用 `codegraph_node`、`codegraph_impact` 和 `codegraph_explore`。影响结果中的测试文件用于生成 `linked`、`changed`、`missing` 或 `unknown` 测试状态。
-- review item 按风险降序排列；全局分数还考虑敏感路径、测试是否变化、影响宽度、变更规模、文件数量、删除、图分析退化和截断。
-- 同一个 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown，MCP 返回两种形式，CLI 通过 `--json` 选择输出。
+- review item 按风险降序排列；整体分数取全局信号总分与最高 review item 分数的较大值，避免局部高风险被较低的聚合分数掩盖。逐符号风险只在 impact 解析为 `high` 且符号映射不为 `low` 时加入 `cross-boundary-impact`：边界保守识别为 workspace root 下的 package/app/service/module/lib，或 `src/` 下第一层领域。当前后端没有结构化关键流程证据，因此不从展示文本推断 `critical-flow`。
+- 同一个核心 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown；CLI 通过 `--json` 选择输出。MCP 投影使用独立的 `schemaVersion: 2`，按 `detailLevel` 投影该报告：默认 `minimal` 只返回摘要、风险信号、紧凑行范围和前三个 review item，并通过 `reviewItemsOmitted` 显式报告响应层截断；显式 `standard` 才返回完整的有界 Diff、影响兼容视图与图上下文。
 
 ### 安装与进程诊断
 
@@ -224,7 +224,7 @@ type CodeGraphCommandRunner = (
 - `filesOmitted`、`symbolsOmitted`、置信度和 warning；
 - 聚焦图上下文和自包含 Markdown。
 
-[`src/mcp-server.ts`](src/mcp-server.ts) 维护与该结构对应的 MCP `outputSchema`。改变报告字段时，TypeScript 类型、MCP schema、渲染器和测试必须同步更新。
+[`src/mcp-server.ts`](src/mcp-server.ts) 维护 MCP `outputSchema` 和核心报告到协议响应的投影。MCP 不重复结构中的 Markdown，不暴露逐行数组、per-file patch 或原始 graph summary；变更行用 count + inclusive ranges 表示。改变核心报告或 MCP 投影字段时，TypeScript 类型、MCP schema、渲染器和测试必须同步更新。
 
 ### ProcessReport 与版本
 
