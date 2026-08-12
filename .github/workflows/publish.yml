@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -21,5 +29,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Verify tag matches package version
-        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
       - run: npm publish
