@@ -35,6 +35,7 @@ describe('CodeGraphBridge', () => {
       projectPath: process.cwd(),
       command: process.execPath,
       args: [fixture],
+      autoInit: false,
     });
 
     try {
@@ -57,6 +58,7 @@ describe('CodeGraphBridge', () => {
       projectPath: process.cwd(),
       command: process.execPath,
       args: [fixture],
+      autoInit: false,
     });
 
     try {
@@ -75,6 +77,7 @@ describe('CodeGraphBridge', () => {
       projectPath: process.cwd(),
       command: process.execPath,
       args: [fixture, '--startup-delay=150'],
+      autoInit: false,
     });
 
     const pending = bridge.callText('codegraph_explore', { query: 'pending' });
