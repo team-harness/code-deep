@@ -51,6 +51,9 @@ describe('code-intel MCP server', () => {
       enum: ['minimal', 'standard'],
       default: 'minimal',
     });
+    expect(tools.tools[1]?.inputSchema).not.toHaveProperty('allOf');
+    expect(tools.tools[1]?.inputSchema).not.toHaveProperty('oneOf');
+    expect(tools.tools[1]?.inputSchema).not.toHaveProperty('anyOf');
     expect(tools.tools[1]?.outputSchema).toMatchObject({
       type: 'object',
       required: expect.arrayContaining([

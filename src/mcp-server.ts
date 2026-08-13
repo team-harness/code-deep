@@ -186,11 +186,6 @@ const TOOLS: Tool[] = [
           description: 'minimal returns priorities and risk without diff/context; standard adds the complete report and bounded diff.',
         },
       },
-      allOf: [
-        { not: { required: ['diff', 'base'] } },
-        { not: { required: ['diff', 'head'] } },
-        { if: { required: ['head'] }, then: { required: ['base'] } },
-      ],
       additionalProperties: false,
     },
     outputSchema: REVIEW_OUTPUT_SCHEMA,
