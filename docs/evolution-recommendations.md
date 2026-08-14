@@ -1,4 +1,4 @@
-# code-intel 演进建议
+# code-deep 演进建议
 
 ## 决策摘要
 
@@ -14,14 +14,14 @@
 
 ## 当前状态
 
-code-intel 的基础不是失控重构，而是可用产品上的定向加固：
+code-deep 的基础不是失控重构，而是可用产品上的定向加固：
 
-- CLI、公共 `CodeIntelClient`、外层 MCP、`ReviewAnalyzer`、图适配器和持久 bridge 已有清楚边界；对外 MCP 仍只暴露 `explore` 和 `review`，应保持这一窄接口。
+- CLI、公共 `CodeDeepClient`、外层 MCP、`ReviewAnalyzer`、图适配器和持久 bridge 已有清楚边界；对外 MCP 仍只暴露 `explore` 和 `review`，应保持这一窄接口。
 - TypeScript 使用严格检查；工程基线包含 `npm run typecheck`、当前测试套件、`npm run build` 和 `npm pack --dry-run --json`，并检查包入口、CLI 可执行位和固定的 CodeGraph `1.5.0` 依赖。
 - bridge 已有连接复用、断线后一次重连和会话内索引去重；图分析失败、截断和低置信度会显式进入 warning 或风险信号，不会伪装为完整的低风险结果。
 - 发布流程具备 tag/version 校验、npm 幂等发布和 GitHub Release 幂等创建，但唯一 workflow 只在 tag 或手动触发时运行（`.github/workflows/publish.yml:3-12`）；`prepublishOnly` 中的类型、测试和构建检查（`package.json:35-41`）没有形成 PR 反馈门禁。
 
-目标用户仍是三类：通过 MCP 做改动前定位和改动后审查的 Agent，通过 CLI 排查的工程师，以及通过 `CodeIntelClient` 嵌入流水线的集成者。现阶段核心承诺是“可信、可解释、按风险排序的代码审查”，不是增加工具数量。
+目标用户仍是三类：通过 MCP 做改动前定位和改动后审查的 Agent，通过 CLI 排查的工程师，以及通过 `CodeDeepClient` 嵌入流水线的集成者。现阶段核心承诺是“可信、可解释、按风险排序的代码审查”，不是增加工具数量。
 
 ## 团队共识与分歧收敛
 
@@ -51,11 +51,11 @@ code-intel 的基础不是失控重构，而是可用产品上的定向加固：
 
 **范围**：
 
-- 仅在工作树模式中过滤 code-intel/CodeGraph 自身生成的索引路径，不改变 caller 提供的 `diff` 或显式 `base`/`head` 范围。
+- 仅在工作树模式中过滤 code-deep/CodeGraph 自身生成的索引路径，不改变 caller 提供的 `diff` 或显式 `base`/`head` 范围。
 - 在摘要中显式记录过滤行为；干净树不再渲染空的 Changed symbols、Impact 和 Diff 段。
 - 增加“新仓库、首次自动初始化、只修改一个用户文件”的端到端回归测试。
 
-**证据**：`CodeIntelClient.review` 和 MCP `review` 会先确保索引；随后 `readGitDiff` 使用 `git ls-files --others --exclude-standard` 收集全部未跟踪文件（`src/review.ts:319-369`）。在项目根未忽略 `.codegraph/` 时，上游自我保留的 `.codegraph/.gitignore` 会进入同一次报告，实测一个用户文件被报告为两个文件。
+**证据**：`CodeDeepClient.review` 和 MCP `review` 会先确保索引；随后 `readGitDiff` 使用 `git ls-files --others --exclude-standard` 收集全部未跟踪文件（`src/review.ts:319-369`）。在项目根未忽略 `.codegraph/` 时，上游自我保留的 `.codegraph/.gitignore` 会进入同一次报告，实测一个用户文件被报告为两个文件。
 
 **依赖与风险**：需要确认索引目录的稳定识别方式。写死路径可能隐藏用户有意审查的 `.codegraph` 内容，因此过滤只应用于隐式工作树采集，并在结果中可见。
 
@@ -71,14 +71,14 @@ code-intel 的基础不是失控重构，而是可用产品上的定向加固：
 
 - 新增独立 verify workflow，在 `pull_request` 和主分支 push 上运行 `npm ci`、typecheck、test、build。
 - 使用 Node 20、22、24 矩阵覆盖 `package.json:32-34` 的声明范围。
-- 在一个 Node 24 job 中执行 `npm pack`，安装生成的 tarball，并做根导入、`code-intel --help` 和 bin 权限 smoke。
+- 在一个 Node 24 job 中执行 `npm pack`，安装生成的 tarball，并做根导入、`code-deep --help` 和 bin 权限 smoke。
 - 将 workflow 设为分支保护的 required check。
 
 **证据**：当前 `.github/workflows` 只有发布 workflow，触发条件是 `v*` tag 和手动 dispatch；质量脚本虽然存在于 `prepublishOnly`，但不是 PR 门禁。
 
 **依赖与风险**：依赖仓库分支保护配置。三版本矩阵会增加执行时间，可把 pack smoke 固定在 Node 24，其他版本只跑核心检查。
 
-**成功指标**：所有 PR 和主分支 push 必须通过 Node 20/22/24 核心检查；Node 24 的发布包 smoke 必须验证 tarball 根导入、`code-intel --help` 和 bin 可执行权限；分支保护将 verify job 设为 required，发布 workflow 不再是第一处发现常规质量问题的地方。
+**成功指标**：所有 PR 和主分支 push 必须通过 Node 20/22/24 核心检查；Node 24 的发布包 smoke 必须验证 tarball 根导入、`code-deep --help` 和 bin 可执行权限；分支保护将 verify job 设为 required，发布 workflow 不再是第一处发现常规质量问题的地方。
 
 **成本**：低，预计 0.5-1 天。
 
@@ -108,14 +108,14 @@ code-intel 的基础不是失控重构，而是可用产品上的定向加固：
 **范围**：
 
 - 分别为 Git、索引和图查询定义可配置阈值，不用一个短超时覆盖大型仓库首次索引。
-- 在公共调用链传递可选 `AbortSignal`；超时或取消后终止 code-intel 直接拥有的子进程，重置 bridge 的 connecting/client 状态。
+- 在公共调用链传递可选 `AbortSignal`；超时或取消后终止 code-deep 直接拥有的子进程，重置 bridge 的 connecting/client 状态。
 - 错误必须包含阶段、项目路径和时限；新增永不响应的 fake server、索引 runner 和 Git fixture。
 
 **证据**：bridge 的 ensure/connect/call 链路直接等待（`src/codegraph-bridge.ts:32-45,80-130`），索引 spawn 没有 timer/signal（`src/project-index.ts:135-154`），Git `execFile` 只配置 cwd、encoding 和 maxBuffer（`src/review.ts:319-369`）。现有测试覆盖崩溃重连和连接期间关闭，但未覆盖永不响应。
 
 **依赖与风险**：需要确认 MCP SDK 的 timeout/abort 接口和跨平台子进程终止策略。阈值过短会误伤大型仓库，因此必须按阶段配置并保留诊断信息。
 
-**成功指标**：第一阶段先让模拟挂起的 Git、index、connect 和 call 在各自配置的阈值内返回带阶段/路径/时限的错误；第二阶段再验证 `AbortSignal` 取消、直接子进程终止、bridge 状态重置，以及同一 client 的下一次调用可以成功。清理范围仅限 code-intel 直接创建的子进程，不触碰 CodeGraph 共享 daemon。
+**成功指标**：第一阶段先让模拟挂起的 Git、index、connect 和 call 在各自配置的阈值内返回带阶段/路径/时限的错误；第二阶段再验证 `AbortSignal` 取消、直接子进程终止、bridge 状态重置，以及同一 client 的下一次调用可以成功。清理范围仅限 code-deep 直接创建的子进程，不触碰 CodeGraph 共享 daemon。
 
 **成本**：中，预计 2-4 天。
 
@@ -130,7 +130,7 @@ code-intel 的基础不是失控重构，而是可用产品上的定向加固：
 - 为 `ps` 增加按宿主/项目聚合、归属 token、启动来源、父连接状态和宿主退出后残留率；只有出现 stale registry、父进程消失或可验证所有权时，才设计默认 dry-run 的回收命令。
 - 先提供第三方宿主配置模板或 `--print-config` 并收集需求；`explore` 结构化输出也先验证集成者是否需要，再承担上游文本解析契约。
 
-**证据**：MCP 已说明首次 `explore`/`review` 自动初始化（`src/mcp-server.ts:37-47,214-235`），但 `architecture.md:123,239` 仍描述仅显式 init；`architecture.md:307` 的旧测试基线也已落后于当前测试套件。installer 只有 Codex/Claude（`src/installer.ts:14,59-71`），`CodeIntelClient.explore` 仍返回原始字符串（`src/client.ts:33-39`）。`ReviewAnalyzer.analyze` 当前顺序执行最多 20 次符号、12 次影响查询和一次 explore，但这只是理论调用上限，不是已证实的用户瓶颈。
+**证据**：MCP 已说明首次 `explore`/`review` 自动初始化（`src/mcp-server.ts:37-47,214-235`），但 `architecture.md:123,239` 仍描述仅显式 init；`architecture.md:307` 的旧测试基线也已落后于当前测试套件。installer 只有 Codex/Claude（`src/installer.ts:14,59-71`），`CodeDeepClient.explore` 仍返回原始字符串（`src/client.ts:33-39`）。`ReviewAnalyzer.analyze` 当前顺序执行最多 20 次符号、12 次影响查询和一次 explore，但这只是理论调用上限，不是已证实的用户瓶颈。
 
 **依赖与风险**：文本快照过细会产生维护噪声，优先断言结构和行为。性能并发可能放大 daemon 负载并破坏结果可复现性；进程回收若无强所有权证据可能误杀共享服务；第三方宿主格式会增加持续维护成本。
 

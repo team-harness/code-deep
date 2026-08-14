@@ -1,6 +1,15 @@
-# code-intel
+# code-deep
 
-`code-intel` gives coding agents two focused workflows: understand code before
+> **Upgrading from code-intel:** install `@team-harness/code-deep`, then run
+> `code-deep install --target codex,claude`. The installer replaces the old MCP
+> server configuration and permissions. Restart the host after installation so
+> its active MCP process uses code-deep.
+>
+> The legacy command `npm install -g @team-harness/code-intel` remains supported:
+> it installs the matching `@team-harness/code-deep` release and exposes only
+> the `code-deep` executable.
+
+`code-deep` gives coding agents two focused workflows: understand code before
 changing it, then review the resulting diff. It keeps one CodeGraph MCP
 connection alive for the lifetime of the outer MCP server and exposes a
 deliberately small interface:
@@ -9,37 +18,37 @@ deliberately small interface:
   and understand blast radius without reading the repository broadly.
 - `review`: diff parsing, changed-symbol mapping, impact collection, explainable risk scoring, and a structured report.
 
-The npm package is `@team-harness/code-intel`. It installs CodeGraph as an exact dependency; end users do not need a separate global CodeGraph installation.
+The npm package is `@team-harness/code-deep`. It installs CodeGraph as an exact dependency; end users do not need a separate global CodeGraph installation.
 
-`code-intel` and its bundled CodeGraph dependency have independent versions.
-`CODE_INTEL_VERSION` identifies this wrapper release; `CODEGRAPH_VERSION`
+`code-deep` and its bundled CodeGraph dependency have independent versions.
+`CODE_DEEP_VERSION` identifies this wrapper release; `CODEGRAPH_VERSION`
 identifies the exact `@colbymchenry/codegraph` version it runs. This allows the
 bridge and reviewer to ship fixes without waiting for a new upstream release.
 
 ## Install
 
 ```bash
-npm install -g @team-harness/code-intel
-code-intel install --target codex,claude
+npm install -g @team-harness/code-deep
+code-deep install --target codex,claude
 ```
 
-`install` registers the `code-intel` MCP server globally for the selected agents.
+`install` registers the `code-deep` MCP server globally for the selected agents.
 It also adds a marker-delimited guidance block to Codex `~/.codex/AGENTS.md`
 and Claude `~/.claude/CLAUDE.md`, directing both agents to use `explore` for
 code discovery and `review` before finalizing changes. Claude receives the
-`mcp__code-intel__*` permission in `~/.claude/settings.json`.
+`mcp__code-deep__*` permission in `~/.claude/settings.json`.
 
-The generated MCP configuration pins the currently installed code-intel version.
-Run `code-intel install` again after upgrading the npm package so agents use the
-same reviewed version as the global CLI.
+The generated MCP configuration invokes the global `code-deep` command. Run
+`code-deep install` again after upgrading from code-intel so existing agent
+configuration, permissions, and instructions migrate to the new identity.
 
 The installer preserves unrelated configuration, backs up each changed existing
-file as `<file>.code-intel.bak`, and is idempotent. It does not initialize a
+file as `<file>.code-deep.bak`, and is idempotent. It does not initialize a
 repository during installation. The first `explore` or `review` call in a Git
 repository automatically initializes a missing `.codegraph/` at that repository
 or worktree root. Concurrent first calls in one process share the same
 initialization. Existing indexes are left to CodeGraph's connect-time catch-up
-and file watcher; use `code-intel init` only for an explicit refresh or to
+and file watcher; use `code-deep init` only for an explicit refresh or to
 diagnose initialization failure.
 
 ## MCP configuration
@@ -47,8 +56,8 @@ diagnose initialization failure.
 ```json
 {
   "mcpServers": {
-    "code-intel": {
-      "command": "code-intel",
+    "code-deep": {
+      "command": "code-deep",
       "args": ["mcp", "--path", "/absolute/path/to/project"]
     }
   }
@@ -62,9 +71,9 @@ strict read-only behavior. Internally, the review module also uses CodeGraph's
 
 ## Agent behavior
 
-When the code-intel MCP tools are available, agents must call them directly and
+When the code-deep MCP tools are available, agents must call them directly and
 must not probe the shell CLI first. Shell commands are fallback-only. User-facing
-messages refer to the capability, server, and tools as `code-intel`; CodeGraph is
+messages refer to the capability, server, and tools as `code-deep`; CodeGraph is
 the internal backend name, not a separate tool to switch to.
 
 ## Explore code
@@ -72,7 +81,7 @@ the internal backend name, not a separate tool to switch to.
 Ask a task-oriented question before reading or editing broadly:
 
 ```bash
-code-intel explore \
+code-deep explore \
   "Trace how AuthService login creates and validates sessions, including callers and blast radius" \
   --path /path/to/project
 ```
@@ -83,8 +92,8 @@ files already known, and the relationship to trace, such as callers, callees,
 data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
-`code-intel` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-intel@1.5.9`.
+`code-deep` command is not visible in the current process's `PATH`, run the same
+command through `npx -y @team-harness/code-deep@2.0.0`.
 
 Use `--max-files <count>` to control the amount of source returned. The MCP
 `explore` tool accepts the same query, project path, and file limit, so agents
@@ -96,19 +105,19 @@ same persistent CodeGraph connection.
 Review the current working tree, including staged, unstaged, and untracked files:
 
 ```bash
-code-intel review /path/to/project
+code-deep review /path/to/project
 ```
 
 Review a branch or pull-request range:
 
 ```bash
-code-intel review /path/to/project --base origin/main --head HEAD
+code-deep review /path/to/project --base origin/main --head HEAD
 ```
 
 Get the structured report:
 
 ```bash
-code-intel review /path/to/project --json
+code-deep review /path/to/project --json
 ```
 
 The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied
@@ -122,12 +131,12 @@ bounded diff, impact compatibility view, and graph context are needed.
 
 ## Process diagnostics
 
-Inspect the local code-intel wrappers, CodeGraph proxies, shared project daemons,
+Inspect the local code-deep wrappers, CodeGraph proxies, shared project daemons,
 and watchdogs without changing any process or file:
 
 ```bash
-code-intel ps
-code-intel ps --json
+code-deep ps
+code-deep ps --json
 ```
 
 The JSON report has `schemaVersion: 1` and records each process's role, status,
@@ -143,7 +152,7 @@ Agent / MCP host
       |
       | stdio MCP: explore, review
       v
-code-intel (long-lived process)
+code-deep (long-lived process)
       |
       +-- CodeGraphBridge ---- persistent MCP client ---- CodeGraph MCP
       |       +-- explore ---- focused source / call paths / blast radius
@@ -165,7 +174,7 @@ additionally share its own per-project daemon across MCP clients.
 
 Risk scores are deterministic and explainable. Signals currently cover sensitive paths, missing test-file changes, graph impact width, high-confidence cross-boundary impact, diff size, file count, deleted files, and incomplete graph analysis. Overall risk is the higher of the global signal total and the highest per-symbol risk, so a locally high-risk symbol cannot be hidden by a low aggregate score. Global signals always use metadata from the complete diff; `maxFiles` and `maxSymbols` limit only deep graph and patch analysis. Scores prioritize review effort; they are not claims that a bug exists.
 
-Cross-boundary scoring requires a confidently parsed impact and a non-low-confidence symbol mapping. Boundaries are conservatively recognized at workspace roots such as `apps/`, `packages/`, `services/`, `modules/`, and `libs/`, or by the first domain below `src/`. The current backend does not expose structured critical-flow evidence, so code-intel does not infer `critical-flow` from display text.
+Cross-boundary scoring requires a confidently parsed impact and a non-low-confidence symbol mapping. Boundaries are conservatively recognized at workspace roots such as `apps/`, `packages/`, `services/`, `modules/`, and `libs/`, or by the first domain below `src/`. The current backend does not expose structured critical-flow evidence, so code-deep does not infer `critical-flow` from display text.
 
 Every core report has `schemaVersion: 1` and a risk-ordered `reviewItems` array. Each
 report also exposes `ignoredPaths` for tool-generated files excluded from an implicit
@@ -177,7 +186,7 @@ retain the complete structure; MCP responses use `schemaVersion: 2`, expose the
 selected `detailLevel` and `reviewItemsOmitted`, and use compact changed-line ranges.
 
 ```ts
-const report = await codeIntel.review();
+const report = await codeDeep.review();
 for (const item of report.reviewItems) {
   console.log(item.risk.level, item.symbol.name, item.tests.status);
 }
@@ -196,18 +205,18 @@ Changed hunks are mapped to the nearest preceding symbol in the current CodeGrap
 ## Library use
 
 ```ts
-import { CodeIntelClient } from '@team-harness/code-intel';
+import { CodeDeepClient } from '@team-harness/code-deep';
 
-const codeIntel = new CodeIntelClient({ projectPath: process.cwd() });
+const codeDeep = new CodeDeepClient({ projectPath: process.cwd() });
 try {
-  const context = await codeIntel.explore('AuthService login');
-  const report = await codeIntel.review();
+  const context = await codeDeep.explore('AuthService login');
+  const report = await codeDeep.review();
 } finally {
-  await codeIntel.close();
+  await codeDeep.close();
 }
 ```
 
-`CodeIntelClient` is the public library boundary. Its `explore()` and `review()`
+`CodeDeepClient` is the public library boundary. Its `explore()` and `review()`
 methods share one persistent CodeGraph connection; the bridge and analyzer are
 internal implementation details. Automatic initialization is enabled by default;
 library consumers that manage indexes separately can pass `autoInit: false`.
@@ -223,4 +232,4 @@ npm run build
 
 ## Upstream
 
-This project is powered by [`@colbymchenry/codegraph`](https://github.com/colbymchenry/codegraph), licensed under MIT. `code-intel` is an independent Team Harness integration and is not an official CodeGraph package.
+This project is powered by [`@colbymchenry/codegraph`](https://github.com/colbymchenry/codegraph), licensed under MIT. `code-deep` is an independent Team Harness integration and is not an official CodeGraph package.

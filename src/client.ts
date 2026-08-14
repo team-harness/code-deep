@@ -6,7 +6,7 @@ import {
   type ReviewRequest,
 } from './review.js';
 
-export interface CodeIntelClientOptions {
+export interface CodeDeepClientOptions {
   projectPath: string;
   command?: string;
   args?: string[];
@@ -18,14 +18,14 @@ export interface ExploreOptions {
   maxFiles?: number;
 }
 
-export type CodeIntelReviewOptions = Omit<ReviewRequest, 'projectPath'>;
+export type CodeDeepReviewOptions = Omit<ReviewRequest, 'projectPath'>;
 
 /** Public library facade for exploration and review over one persistent bridge. */
-export class CodeIntelClient {
+export class CodeDeepClient {
   private readonly bridge: CodeGraphBridge;
   private readonly analyzer: ReviewAnalyzer;
 
-  constructor(private readonly options: CodeIntelClientOptions) {
+  constructor(private readonly options: CodeDeepClientOptions) {
     this.bridge = new CodeGraphBridge(options);
     this.analyzer = new ReviewAnalyzer(this.bridge);
   }
@@ -38,7 +38,7 @@ export class CodeIntelClient {
     });
   }
 
-  async review(options: CodeIntelReviewOptions = {}): Promise<ReviewReport> {
+  async review(options: CodeDeepReviewOptions = {}): Promise<ReviewReport> {
     const request = {
       ...options,
       projectPath: this.options.projectPath,

@@ -23,8 +23,8 @@ describe('process reporting', () => {
   it('classifies a shared daemon, session proxy, wrapper, launcher, and watchdog', () => {
     const raw: RawProcess[] = [
       { pid: 10, ppid: 1, uptimeSeconds: 1000, command: '/Applications/Codex.app/Codex' },
-      { pid: 20, ppid: 10, uptimeSeconds: 500, command: 'npm exec @team-harness/code-intel mcp' },
-      { pid: 30, ppid: 20, uptimeSeconds: 490, command: 'node /pkg/dist/cli.js mcp --path /repo' },
+      { pid: 20, ppid: 10, uptimeSeconds: 500, command: 'npm exec @team-harness/code-deep mcp' },
+      { pid: 30, ppid: 20, uptimeSeconds: 490, command: 'node /pkg/code-deep mcp --path /repo' },
       { pid: 40, ppid: 30, uptimeSeconds: 480, command: 'node npm-shim.js serve --mcp --path /repo' },
       { pid: 41, ppid: 40, uptimeSeconds: 480, command: 'node -e Main thread unresponsive watchdog' },
       { pid: 50, ppid: 1, uptimeSeconds: 600, command: 'node npm-shim.js serve --mcp --path /repo' },
@@ -42,7 +42,7 @@ describe('process reporting', () => {
     expect(report.processes.map(({ pid, role, status, projectPath }) => ({ pid, role, status, projectPath })))
       .toEqual([
         { pid: 20, role: 'launcher', status: 'active', projectPath: '/repo' },
-        { pid: 30, role: 'code-intel-mcp', status: 'active', projectPath: '/repo' },
+        { pid: 30, role: 'code-deep-mcp', status: 'active', projectPath: '/repo' },
         { pid: 40, role: 'codegraph-proxy', status: 'active', projectPath: '/repo' },
         { pid: 41, role: 'codegraph-watchdog', status: 'healthy', projectPath: '/repo' },
         { pid: 50, role: 'codegraph-daemon', status: 'shared', projectPath: '/repo' },

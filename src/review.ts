@@ -370,7 +370,7 @@ async function readGitDiff(
     );
     const ignoredPaths: string[] = [];
     const untrackedPaths = untrackedOutput.split('\0').filter(Boolean).filter((path) => {
-      if (!isCodeIntelGeneratedPath(path)) return true;
+      if (!isCodeDeepGeneratedPath(path)) return true;
       ignoredPaths.push(path);
       return false;
     });
@@ -389,7 +389,7 @@ async function readGitDiff(
   }
 }
 
-function isCodeIntelGeneratedPath(path: string): boolean {
+function isCodeDeepGeneratedPath(path: string): boolean {
   const normalized = path.replaceAll('\\', '/').replace(/^\.\//, '');
   return normalized === '.codegraph/.gitignore';
 }

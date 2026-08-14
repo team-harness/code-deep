@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { CODE_INTEL_VERSION } from './version.js';
+import { CODE_DEEP_VERSION } from './version.js';
 
 export type InstallTarget = 'codex' | 'claude';
 export type InstallAction = 'created' | 'updated' | 'unchanged';
@@ -24,26 +24,28 @@ export interface InstallResult {
   files: InstallFileResult[];
 }
 
-export interface InstallCodeIntelOptions {
+export interface InstallCodeDeepOptions {
   homeDir: string;
   targets: InstallTarget[];
 }
 
-const PACKAGE_SPEC = `@team-harness/code-intel@${CODE_INTEL_VERSION}`;
+const PACKAGE_SPEC = `@team-harness/code-deep@${CODE_DEEP_VERSION}`;
 const MCP_ENTRY = {
   type: 'stdio',
-  command: 'code-intel',
+  command: 'code-deep',
   args: ['mcp'],
 };
 
-const INSTRUCTIONS_START = '<!-- CODE_INTEL_START -->';
-const INSTRUCTIONS_END = '<!-- CODE_INTEL_END -->';
+const INSTRUCTIONS_START = '<!-- CODE_DEEP_START -->';
+const INSTRUCTIONS_END = '<!-- CODE_DEEP_END -->';
+const LEGACY_INSTRUCTIONS_START = '<!-- CODE_INTEL_START -->';
+const LEGACY_INSTRUCTIONS_END = '<!-- CODE_INTEL_END -->';
 const INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
-## code-intel
+## code-deep
 
-Use code-intel for code exploration and review assistance in Git repositories. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree:
+Use code-deep for code exploration and review assistance in Git repositories. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree:
 
-Prefer the code-intel MCP tools \`code-intel.explore\` and \`code-intel.review\` whenever they are available. Do not probe or invoke the shell CLI before using an available MCP tool. Refer to the capability, server, and tools as \`code-intel\` in user-facing messages. CodeGraph is an internal backend. Do not describe a fallback as switching to CodeGraph.
+Prefer the code-deep MCP tools \`code-deep.explore\` and \`code-deep.review\` whenever they are available. Do not probe or invoke the shell CLI before using an available MCP tool. Refer to the capability, server, and tools as \`code-deep\` in user-facing messages. CodeGraph is an internal backend. Do not describe a fallback as switching to CodeGraph.
 
 1. Before broad reading or editing, call \`explore\` with the absolute Git root as \`projectPath\`. Make \`query\` state the task goal, relevant symbols or files, and the relationship to trace (callers, callees, data flow, or blast radius).
 2. After changes, call \`review\` with the same \`projectPath\`. Omit \`base\`/\`head\` for the current working tree; provide both for a branch or pull-request range; use \`diff\` only for a caller-supplied patch.
@@ -51,9 +53,9 @@ Prefer the code-intel MCP tools \`code-intel.explore\` and \`code-intel.review\`
 4. When \`filesOmitted\` or \`symbolsOmitted\` is nonzero, confidence is low, or warnings are present, run a targeted \`explore\` for the affected symbol or path.
 5. Before emitting a review comment, verify a concrete failure path against the diff and focused source context.
 
-Shell fallback, only when the code-intel MCP tools are unavailable: use \`code-intel explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-intel review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-intel\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
+Shell fallback, only when the code-deep MCP tools are unavailable: use \`code-deep explore "<task goal + symbols/files + relationship>" --path /absolute/git/root\` and \`code-deep review /absolute/git/root [--base <ref> --head <ref>]\`. If \`code-deep\` is not in \`PATH\`, run the same command through \`npx -y ${PACKAGE_SPEC}\`.
 
-Do not ask the user to initialize new worktrees. Use \`code-intel init\` only for an explicit manual refresh or to diagnose an initialization failure.
+Do not ask the user to initialize new worktrees. Use \`code-deep init\` only for an explicit manual refresh or to diagnose an initialization failure.
 ${INSTRUCTIONS_END}`;
 
 export function parseInstallTargets(value: string): InstallTarget[] {
@@ -70,8 +72,8 @@ export function parseInstallTargets(value: string): InstallTarget[] {
   return targets;
 }
 
-export async function installCodeIntel(
-  options: InstallCodeIntelOptions,
+export async function installCodeDeep(
+  options: InstallCodeDeepOptions,
 ): Promise<InstallResult> {
   if (!options.targets.length) throw new Error('At least one install target is required');
   const files: InstallFileResult[] = [];
@@ -91,8 +93,8 @@ async function installCodex(homeDir: string): Promise<InstallFileResult[]> {
   const instructionsPath = join(directory, 'AGENTS.md');
   const currentConfig = await readOptionalFile(configPath);
   const block = [
-    '[mcp_servers.code-intel]',
-    'command = "code-intel"',
+    '[mcp_servers.code-deep]',
+    'command = "code-deep"',
     'args = ["mcp"]',
   ].join('\n');
 
@@ -113,22 +115,20 @@ async function installClaude(homeDir: string): Promise<InstallFileResult[]> {
 
   const mcp = await readJsonObject(mcpPath);
   const mcpServers = objectProperty(mcp, 'mcpServers', mcpPath);
-  const mcpAlreadyInstalled = jsonEqual(mcpServers['code-intel'], MCP_ENTRY);
-  if (!mcpAlreadyInstalled) mcpServers['code-intel'] = MCP_ENTRY;
+  delete mcpServers['code-intel'];
+  mcpServers['code-deep'] = MCP_ENTRY;
 
   const settings = await readJsonObject(settingsPath);
   const permissions = objectProperty(settings, 'permissions', settingsPath);
   const allow = arrayProperty(permissions, 'allow', settingsPath);
-  const permissionAlreadyInstalled = allow.includes('mcp__code-intel__*');
-  if (!permissionAlreadyInstalled) allow.push('mcp__code-intel__*');
+  permissions.allow = [
+    ...allow.filter((entry) => entry !== 'mcp__code-intel__*' && entry !== 'mcp__code-deep__*'),
+    'mcp__code-deep__*',
+  ];
 
   return [
-    mcpAlreadyInstalled
-      ? unchanged(mcpPath)
-      : await writeIfChanged(mcpPath, `${JSON.stringify(mcp, null, 2)}\n`),
-    permissionAlreadyInstalled
-      ? unchanged(settingsPath)
-      : await writeIfChanged(settingsPath, `${JSON.stringify(settings, null, 2)}\n`),
+    await writeIfChanged(mcpPath, `${JSON.stringify(mcp, null, 2)}\n`),
+    await writeIfChanged(settingsPath, `${JSON.stringify(settings, null, 2)}\n`),
     await writeIfChanged(
       instructionsPath,
       upsertInstructions(await readOptionalFile(instructionsPath)),
@@ -138,45 +138,61 @@ async function installClaude(homeDir: string): Promise<InstallFileResult[]> {
 
 function upsertTomlTable(content: string, block: string): string {
   const lines = content.split(/(?<=\n)/);
-  const headerIndexes = lines
-    .map((line, index) => isCodeIntelTomlHeader(line) ? index : -1)
-    .filter((index) => index !== -1);
-  if (headerIndexes.length > 1) {
-    throw new Error('Cannot safely update Codex config: code-intel MCP table is declared more than once');
+  const managedHeaders = lines
+    .map((line, index) => ({ index, key: managedTomlKey(line) }))
+    .filter((header): header is { index: number; key: ManagedTomlKey } => header.key !== null);
+  for (const key of MANAGED_TOML_KEYS) {
+    if (managedHeaders.filter((header) => header.key === key).length > 1) {
+      throw new Error(`Cannot safely update Codex config: ${key} MCP table is declared more than once`);
+    }
   }
   const parsed = parseTomlConfig(content);
   const mcpServers = parsed.mcp_servers;
   if (mcpServers !== undefined && !isRecord(mcpServers)) {
     throw new Error('Cannot safely update Codex config: mcp_servers is not a TOML table');
   }
-  const hasSemanticEntry = isRecord(mcpServers)
-    && Object.prototype.hasOwnProperty.call(mcpServers, 'code-intel');
-  const headerIndex = headerIndexes[0] ?? -1;
-  if (hasSemanticEntry && headerIndex === -1) {
-    throw new Error('Cannot safely update Codex config: code-intel MCP uses an inline or dotted representation');
+  for (const key of MANAGED_TOML_KEYS) {
+    const hasSemanticEntry = isRecord(mcpServers)
+      && Object.prototype.hasOwnProperty.call(mcpServers, key);
+    const hasHeader = managedHeaders.some((header) => header.key === key);
+    if (hasSemanticEntry && !hasHeader) {
+      throw new Error(`Cannot safely update Codex config: ${key} MCP uses an inline or dotted representation`);
+    }
   }
-  if (headerIndex === -1) {
+  if (!managedHeaders.length) {
     const trimmed = content.trimEnd();
     return `${trimmed}${trimmed ? '\n\n' : ''}${block}\n`;
   }
 
-  let endIndex = headerIndex + 1;
-  while (endIndex < lines.length && !/^\s*\[\[?[^\n]+\]\]?\s*(?:#.*)?(?:\r?\n)?$/.test(lines[endIndex]!)) {
-    endIndex++;
+  const managedIndexes = new Set(managedHeaders.map(({ index }) => index));
+  const firstManagedIndex = managedHeaders[0]!.index;
+  const output: string[] = [];
+  let skippingManagedTable = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (managedIndexes.has(index)) {
+      if (index === firstManagedIndex) output.push(`${block}\n`);
+      skippingManagedTable = true;
+      continue;
+    }
+    if (/^\s*\[\[?[^\n]+\]\]?\s*(?:#.*)?(?:\r?\n)?$/.test(line)) {
+      skippingManagedTable = false;
+    }
+    if (!skippingManagedTable) output.push(line);
   }
-  const before = lines.slice(0, headerIndex).join('').trimEnd();
-  const after = lines.slice(endIndex).join('').trimStart();
-  return `${before}${before ? '\n\n' : ''}${block}${after ? `\n\n${after}` : '\n'}`;
+  return `${output.join('').trimEnd()}\n`;
 }
 
 const TOML_MCP_KEY = String.raw`(?:mcp_servers|"mcp_servers"|'mcp_servers')`;
-const TOML_CODE_INTEL_KEY = String.raw`(?:code-intel|"code-intel"|'code-intel')`;
-const CODE_INTEL_TABLE_PATTERN = new RegExp(
-  String.raw`^\s*\[\s*${TOML_MCP_KEY}\s*\.\s*${TOML_CODE_INTEL_KEY}\s*\]\s*(?:#.*)?(?:\r?\n)?$`,
-);
+const MANAGED_TOML_KEYS = ['code-deep', 'code-intel'] as const;
+type ManagedTomlKey = typeof MANAGED_TOML_KEYS[number];
+const MANAGED_TABLE_PATTERNS = Object.fromEntries(MANAGED_TOML_KEYS.map((key) => [
+  key,
+  new RegExp(String.raw`^\s*\[\s*${TOML_MCP_KEY}\s*\.\s*(?:${key}|"${key}"|'${key}')\s*\]\s*(?:#.*)?(?:\r?\n)?$`),
+])) as Record<ManagedTomlKey, RegExp>;
 
-function isCodeIntelTomlHeader(line: string): boolean {
-  return CODE_INTEL_TABLE_PATTERN.test(line);
+function managedTomlKey(line: string): ManagedTomlKey | null {
+  return MANAGED_TOML_KEYS.find((key) => MANAGED_TABLE_PATTERNS[key].test(line)) ?? null;
 }
 
 function parseTomlConfig(content: string): Record<string, unknown> {
@@ -192,18 +208,31 @@ function parseTomlConfig(content: string): Record<string, unknown> {
 
 function upsertInstructions(content: string | null): string {
   if (content === null) return `${INSTRUCTIONS_BLOCK}\n`;
-  const start = content.indexOf(INSTRUCTIONS_START);
-  const end = content.indexOf(INSTRUCTIONS_END);
-  if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
-    throw new Error('Cannot update code-intel instructions: marker block is incomplete');
+  const markerPairs = [
+    [INSTRUCTIONS_START, INSTRUCTIONS_END],
+    [LEGACY_INSTRUCTIONS_START, LEGACY_INSTRUCTIONS_END],
+  ] as const;
+  const blocks = markerPairs.flatMap(([startMarker, endMarker]) => {
+    const start = content.indexOf(startMarker);
+    const end = content.indexOf(endMarker);
+    if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
+      throw new Error('Cannot update code-deep instructions: marker block is incomplete');
+    }
+    return start === -1 ? [] : [{ start, end: end + endMarker.length }];
+  }).sort((left, right) => left.start - right.start);
+  if (!blocks.length) {
+    const trimmed = content.trimEnd();
+    return `${trimmed}${trimmed ? '\n\n' : ''}${INSTRUCTIONS_BLOCK}\n`;
   }
-  if (start !== -1) {
-    return content.slice(0, start)
-      + INSTRUCTIONS_BLOCK
-      + content.slice(end + INSTRUCTIONS_END.length);
+  let output = '';
+  let cursor = 0;
+  for (const [index, current] of blocks.entries()) {
+    output += content.slice(cursor, current.start);
+    if (index === 0) output += INSTRUCTIONS_BLOCK;
+    cursor = current.end;
   }
-  const trimmed = content.trimEnd();
-  return `${trimmed}${trimmed ? '\n\n' : ''}${INSTRUCTIONS_BLOCK}\n`;
+  output += content.slice(cursor);
+  return output;
 }
 
 async function readJsonObject(path: string): Promise<Record<string, unknown>> {
@@ -253,10 +282,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 async function readOptionalFile(path: string): Promise<string | null> {
   try {
     return await readFile(path, 'utf8');
@@ -274,12 +299,12 @@ async function writeIfChanged(path: string, content: string): Promise<InstallFil
   let backupPath: string | undefined;
   let mode = 0o600;
   if (current !== null) {
-    backupPath = `${path}.code-intel.bak`;
+    backupPath = `${path}.code-deep.bak`;
     mode = (await stat(path)).mode;
     await copyFile(path, backupPath);
   }
 
-  const temporary = `${path}.code-intel.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+  const temporary = `${path}.code-deep.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
   try {
     await writeFile(temporary, content, { mode });
     await rename(temporary, path);

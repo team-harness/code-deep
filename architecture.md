@@ -1,6 +1,6 @@
-# code-intel 架构
+# code-deep 架构
 
-`@team-harness/code-intel` 是 CodeGraph 之上的持久化代码智能与审查桥。它负责三类调用入口、MCP/子进程生命周期、Git diff 审查编排、上游文本结果的标准化，以及安装和诊断工具；索引构建、符号检索和影响分析本身由固定版本的 `@colbymchenry/codegraph` 提供。
+`@team-harness/code-deep` 是 CodeGraph 之上的持久化代码智能与审查桥。它负责三类调用入口、MCP/子进程生命周期、Git diff 审查编排、上游文本结果的标准化，以及安装和诊断工具；索引构建、符号检索和影响分析本身由固定版本的 `@colbymchenry/codegraph` 提供。
 
 本文描述当前实现，而不是未来设计。源码入口以 [`package.json`](package.json)、[`src/cli.ts`](src/cli.ts) 和 [`src/index.ts`](src/index.ts) 为准。
 
@@ -14,9 +14,9 @@ flowchart LR
     host["Claude / Codex 等 MCP host"]
   end
 
-  subgraph wrapper["code-intel"]
+  subgraph wrapper["code-deep"]
     cli["CLI 组合根<br/>cli.ts"]
-    publicApi["CodeIntelClient<br/>client.ts"]
+    publicApi["CodeDeepClient<br/>client.ts"]
     outerMcp["外层 MCP server<br/>mcp-server.ts"]
     review["ReviewAnalyzer<br/>review.ts"]
     adapter["CodeGraphAdapter<br/>graph-adapter.ts"]
@@ -57,17 +57,17 @@ flowchart LR
   diagnostics --> registry
 ```
 
-系统存在两个 stdio JSON-RPC 协议边界：MCP host 到外层 code-intel server，以及 `CodeGraphBridge` 到内层 `serve --mcp` 子进程。`init`/`sync` 是另一条普通 CLI 子进程路径：它只收集 stdout/stderr，进程退出即完成，不复用 bridge 的 MCP 会话。
+系统存在两个 stdio JSON-RPC 协议边界：MCP host 到外层 code-deep server，以及 `CodeGraphBridge` 到内层 `serve --mcp` 子进程。`init`/`sync` 是另一条普通 CLI 子进程路径：它只收集 stdout/stderr，进程退出即完成，不复用 bridge 的 MCP 会话。
 
-`CodeGraphBridge` 拥有它直接派生的 `serve --mcp` 会话及 transport；`close()` 关闭 client/transport，并结束这个直接子进程。即使进程诊断因同项目存在 live daemon 而把该子进程标成 `codegraph-proxy`，直接会话的关闭责任也不转移。上游共享的项目 daemon 和 watchdog 则不由 code-intel 创建或清理，`ps` 只观察它们。
+`CodeGraphBridge` 拥有它直接派生的 `serve --mcp` 会话及 transport；`close()` 关闭 client/transport，并结束这个直接子进程。即使进程诊断因同项目存在 live daemon 而把该子进程标成 `codegraph-proxy`，直接会话的关闭责任也不转移。上游共享的项目 daemon 和 watchdog 则不由 code-deep 创建或清理，`ps` 只观察它们。
 
 ## 公共入口
 
 | 入口 | 当前公开能力 | 项目路径与生命周期 |
 | --- | --- | --- |
-| CLI [`src/cli.ts`](src/cli.ts) | `install`、`ps`/`processes`、`mcp`、`init`、`explore`、`review` | `explore` 和 `review` 每次创建一个 `CodeIntelClient`，并在 `finally` 中关闭；`mcp` 保持 bridge 常驻，收到 server close、`SIGINT` 或 `SIGTERM` 时关闭 |
+| CLI [`src/cli.ts`](src/cli.ts) | `install`、`ps`/`processes`、`mcp`、`init`、`explore`、`review` | `explore` 和 `review` 每次创建一个 `CodeDeepClient`，并在 `finally` 中关闭；`mcp` 保持 bridge 常驻，收到 server close、`SIGINT` 或 `SIGTERM` 时关闭 |
 | MCP [`src/mcp-server.ts`](src/mcp-server.ts) | 只公开 `explore` 和 `review`；两者标记为只读、幂等 | server 有默认 `projectPath`，每次工具调用可覆盖；工具异常转换为 MCP `isError` 结果 |
-| npm 库 [`src/index.ts`](src/index.ts) | `CodeIntelClient`、版本常量和 review 数据类型 | `projectPath` 在构造时固定；调用方负责执行 `close()` |
+| npm 库 [`src/index.ts`](src/index.ts) | `CodeDeepClient`、版本常量和 review 数据类型 | `projectPath` 在构造时固定；调用方负责执行 `close()` |
 
 `CodeGraphBridge`、`ReviewAnalyzer`、`CodeGraphAdapter` 和 MCP server 工厂都不是根包的运行时公共 API。这个边界由 [`tests/client.test.ts`](tests/client.test.ts) 固化，避免调用方依赖内部传输与解析实现。
 
@@ -120,21 +120,21 @@ flowchart TD
 
 ### 索引初始化与刷新
 
-`code-intel init [path]` 是显式索引入口；首次 `explore` 或 `review` 也会在 Git 仓库中自动创建缺失的 `.codegraph`，后续调用复用已有索引。
+`code-deep init [path]` 是显式索引入口；首次 `explore` 或 `review` 也会在 Git 仓库中自动创建缺失的 `.codegraph`，后续调用复用已有索引。
 
 1. [`initializeProjectIndex`](src/project-index.ts) 从请求路径向上查找 `.git`，将最近的 Git 边界作为仓库根；worktree 中的 `.git` 文件同样有效。
 2. 它继续向上查找已有的 `.codegraph` 目录，但不会越过仓库根，因此不会误用相邻或父仓库的索引。
 3. 已有索引执行 CodeGraph `sync <root> --quiet`；没有索引时执行 `init <root>`。
 4. 默认 runner 以 `node <codegraph-bin> ...args` 派生一次性 CLI 子进程，并收集 stdout/stderr；它不经过 `CodeGraphBridge` 或 `serve --mcp` 连接。
-5. 子进程非零退出或收到信号时失败；错误输出会重新标记为 code-intel 命令语义后再抛出。
+5. 子进程非零退出或收到信号时失败；错误输出会重新标记为 code-deep 命令语义后再抛出。
 
-索引内容由 CodeGraph 写入 `<root>/.codegraph`。code-intel 只决定目标根和动作，不解释索引内部格式。
+索引内容由 CodeGraph 写入 `<root>/.codegraph`。code-deep 只决定目标根和动作，不解释索引内部格式。
 
 ### Explore
 
 CLI、MCP 和 npm 库最终都调用 `codegraph_explore`：
 
-1. CLI/npm 路径经过 [`CodeIntelClient.explore`](src/client.ts)；MCP handler 在 [`src/mcp-server.ts`](src/mcp-server.ts) 中直接使用注入的 `GraphReader`。
+1. CLI/npm 路径经过 [`CodeDeepClient.explore`](src/client.ts)；MCP handler 在 [`src/mcp-server.ts`](src/mcp-server.ts) 中直接使用注入的 `GraphReader`。
 2. [`CodeGraphBridge.callText`](src/codegraph-bridge.ts) 通过持久 stdio 连接调用内层 CodeGraph。
 3. 返回值保持为原始文本。Explore 不经过 `CodeGraphAdapter`，因此不能被描述为结构化结果。
 
@@ -167,7 +167,7 @@ flowchart TD
 
 - `diff` 与 `base`/`head` 互斥，`head` 必须配合 `base`；校验发生在任何图调用之前。
 - 未提供 diff 时，range 模式使用三点 Git diff；工作树模式合并 `HEAD` diff 和未跟踪文件。仓库尚无首个 commit 时也能审查未跟踪文件。
-- 隐式工作树采集会排除 code-intel 自动初始化生成的 `.codegraph/.gitignore`，并通过 `ignoredPaths` 显式记录；caller-supplied diff 和 range 不应用该过滤。
+- 隐式工作树采集会排除 code-deep 自动初始化生成的 `.codegraph/.gitignore`，并通过 `ignoredPaths` 显式记录；caller-supplied diff 和 range 不应用该过滤。
 - `maxFiles` 和 `maxSymbols` 只限制昂贵的图分析。全局风险始终基于完整 diff，报告通过 `filesOmitted` 和 `symbolsOmitted` 显式暴露截断。
 - 变更行映射到同文件中最近的前置符号；`mappingConfidence` 表达这种启发式映射的可靠度。
 - `CodeGraphAdapter` 分别调用 `codegraph_node`、`codegraph_impact` 和 `codegraph_explore`。影响结果中的测试文件用于生成 `linked`、`changed`、`missing` 或 `unknown` 测试状态。
@@ -176,10 +176,10 @@ flowchart TD
 
 ### 安装与进程诊断
 
-这两个 CLI 用例不经过 `CodeIntelClient` 或 review 主链：
+这两个 CLI 用例不经过 `CodeDeepClient` 或 review 主链：
 
-- [`installCodeIntel`](src/installer.ts) 支持 Codex 和 Claude。它以结构化 TOML/JSON 校验目标配置，用标记块维护 agent 指令，保留无关内容；修改既有文件时创建 `.code-intel.bak`，通过同目录临时文件和 rename 完成原子替换。
-- [`collectProcessReport`](src/process-report.ts) 并行读取 OS 进程表、`~/.codegraph/daemons/*.json`，并在 POSIX 上用 `fs.access` 收集 socket 路径存在性；它分类 launcher、code-intel MCP、CodeGraph session/proxy/daemon/watchdog 及失效 registry 记录。路径存在不证明 socket 可连接或 daemon 存活；Windows 则从活动 daemon registry 进程推断 named-pipe 状态。输出只提供证据和 `cleanupCandidate`，不会杀进程或删除文件。
+- [`installCodeDeep`](src/installer.ts) 支持 Codex 和 Claude。它以结构化 TOML/JSON 校验目标配置，用标记块维护 agent 指令，保留无关内容；修改既有文件时创建 `.code-deep.bak`，通过同目录临时文件和 rename 完成原子替换。
+- [`collectProcessReport`](src/process-report.ts) 并行读取 OS 进程表、`~/.codegraph/daemons/*.json`，并在 POSIX 上用 `fs.access` 收集 socket 路径存在性；它分类 launcher、code-deep MCP、CodeGraph session/proxy/daemon/watchdog 及失效 registry 记录。路径存在不证明 socket 可连接或 daemon 存活；Windows 则从活动 daemon registry 进程推断 named-pipe 状态。输出只提供证据和 `cleanupCandidate`，不会杀进程或删除文件。
 
 ## 数据契约
 
@@ -231,13 +231,13 @@ type CodeGraphCommandRunner = (
 
 [`ProcessReport`](src/process-report.ts) 同样使用 `schemaVersion: 1`。它记录生成时间、平台、进程分类、状态、项目归属、证据和只读清理候选，不表达自动清理指令。
 
-[`src/version.ts`](src/version.ts) 从 `package.json` 分别读取 `CODE_INTEL_VERSION` 和 `CODEGRAPH_VERSION`。前者标识外层 MCP server 和 bridge client，后者表达绑定的后端依赖版本；两者有意独立演进。
+[`src/version.ts`](src/version.ts) 从 `package.json` 分别读取 `CODE_DEEP_VERSION` 和 `CODEGRAPH_VERSION`。前者标识外层 MCP server 和 bridge client，后者表达绑定的后端依赖版本；两者有意独立演进。
 
 ## 状态与生命周期
 
-| 状态位置 | 所有者 | code-intel 行为 |
+| 状态位置 | 所有者 | code-deep 行为 |
 | --- | --- | --- |
-| `<root>/.codegraph` | CodeGraph | 显式 `code-intel init` 或首次 `explore`/`review` 触发创建或刷新；工作树 review 不把 code-intel 自动生成的 `.codegraph/.gitignore` 当作用户改动 |
+| `<root>/.codegraph` | CodeGraph | 显式 `code-deep init` 或首次 `explore`/`review` 触发创建或刷新；工作树 review 不把 code-deep 自动生成的 `.codegraph/.gitignore` 当作用户改动 |
 | `~/.codegraph/daemons/*.json` | CodeGraph | `ps` 只读 registry，并与实时进程和 socket 路径存在性证据合并；不执行连接探测 |
 | Codex/Claude 用户配置 | 用户，由 installer 协助维护 | `install` 执行幂等更新、备份和原子 rename |
 | `codegraph.json` | 项目 | review 只读取 `extensions` 覆盖；缺失或格式错误时忽略覆盖 |
@@ -249,9 +249,9 @@ type CodeGraphCommandRunner = (
 
 - 单次 CLI `explore`/`review` 在 `finally` 中关闭 client；
 - `mcp` 命令由外层 server close 和进程信号共同关闭 bridge，并以 guard 防止重复关闭；
-- npm 库调用方必须显式调用 `CodeIntelClient.close()`；
+- npm 库调用方必须显式调用 `CodeDeepClient.close()`；
 - bridge 关闭 client/transport 时结束它直接派生的 session/proxy 子进程；
-- 共享项目 daemon、watchdog 及 registry 由 CodeGraph 上游拥有，code-intel 不执行清理。
+- 共享项目 daemon、watchdog 及 registry 由 CodeGraph 上游拥有，code-deep 不执行清理。
 
 进程报告中的 POSIX socket 状态来自 `fs.access`：它只能证明路径当时存在。失效但未删除的 socket 仍可能成为 `shared` 状态证据，因此该报告不能被解释成可达性或 liveness 保证。
 
@@ -267,7 +267,7 @@ type CodeGraphCommandRunner = (
 | 图上下文查询 | 报告保留 `CodeGraph explore failed` 文本和 warning |
 | 任一图 warning | 全局增加 `graph-analysis-incomplete` 风险信号，避免退化分析呈现为无风险 |
 | `codegraph.json` | 缺失、损坏或非法扩展项被忽略；核心 review 继续 |
-| 索引子进程 | 非零退出或信号退出显式失败；上游品牌和命令提示被重写成 code-intel 语义 |
+| 索引子进程 | 非零退出或信号退出显式失败；上游品牌和命令提示被重写成 code-deep 语义 |
 | Installer | 对重复/非表 TOML、非法 JSON 结构或损坏的标记块拒绝写入，避免静默破坏配置 |
 
 这种策略刻意区分“无法取得 diff”与“图证据不完整”：前者无法形成审查输入，必须失败；后者仍可返回 diff 和风险信息，但必须显式降低置信度。
@@ -277,7 +277,7 @@ type CodeGraphCommandRunner = (
 主要扩展点：
 
 - `GraphReader` 可替换 Explore/Review 的图读取后端，也是 review、MCP 和单元测试的依赖注入边界；它不承载索引命令。
-- `CodeIntelClientOptions.command/args/env` 可替换 CodeGraph 子进程启动方式。
+- `CodeDeepClientOptions.command/args/env` 可替换 CodeGraph 子进程启动方式。
 - `InitializeProjectIndexOptions.run/write` 可替换独立的 `CodeGraphCommandRunner` 与输出端。
 - `BuildProcessReportOptions` 可注入平台、时间和 socket 路径存在性判断，保持分类逻辑为可测纯函数。
 - 项目级 `codegraph.json.extensions` 可增加深度图分析的文件扩展名。
@@ -287,7 +287,7 @@ type CodeGraphCommandRunner = (
 - [`src/graph-adapter.ts`](src/graph-adapter.ts) 解析 CodeGraph 人类可读文本。后端输出格式变化不会被静默接受，但可能让置信度降级；更新后端版本时必须复核解析器和 adapter 测试。
 - [`src/review.ts`](src/review.ts) 同时拥有 diff I/O、领域分析、风险评分和 Markdown 渲染，是职责最宽、变更半径最大的模块。
 - [`src/cli.ts`](src/cli.ts) 知道所有用例，是预期的组合根；业务逻辑不应继续向这里移动。
-- Bridge 向 CodeGraph 子进程强制允许 `explore,node,impact,status`。当前 code-intel 实际调用前三者；新增下游能力时必须同时审查工具白名单和外层 MCP 暴露面。
+- Bridge 向 CodeGraph 子进程强制允许 `explore,node,impact,status`。当前 code-deep 实际调用前三者；新增下游能力时必须同时审查工具白名单和外层 MCP 暴露面。
 - `project-index.ts` 依赖 bridge 文件中的二进制定位函数。若传输层被拆分，二进制解析应迁移到共享的后端定位模块。
 
 ## 测试架构

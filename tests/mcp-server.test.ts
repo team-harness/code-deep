@@ -1,9 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCodeIntelServer } from '../src/mcp-server.js';
+import { createCodeDeepServer } from '../src/mcp-server.js';
 
-describe('code-intel MCP server', () => {
+describe('code-deep MCP server', () => {
   const clients: Client[] = [];
 
   afterEach(async () => {
@@ -19,7 +19,7 @@ describe('code-intel MCP server', () => {
       },
     };
     const ensured: string[] = [];
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge,
       ensureIndex: async (projectPath) => { ensured.push(projectPath); },
@@ -31,9 +31,9 @@ describe('code-intel MCP server', () => {
     await client.connect(clientTransport);
 
     const instructions = client.getInstructions();
-    expect(instructions).toContain('Prefer these code-intel MCP tools over shell commands');
-    expect(instructions).toContain('Do not probe the code-intel CLI when MCP tools are available');
-    expect(instructions).toContain('Refer to this capability as code-intel');
+    expect(instructions).toContain('Prefer these code-deep MCP tools over shell commands');
+    expect(instructions).toContain('Do not probe the code-deep CLI when MCP tools are available');
+    expect(instructions).toContain('Refer to this capability as code-deep');
     expect(instructions).toContain('Do not tell the user you are switching to CodeGraph');
     expect(instructions).not.toContain('share one persistent CodeGraph connection');
 
@@ -99,7 +99,7 @@ describe('code-intel MCP server', () => {
         return 'login context';
       },
     };
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge,
       ensureIndex: async () => {},
@@ -170,7 +170,7 @@ describe('code-intel MCP server', () => {
         return '';
       },
     };
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge,
       ensureIndex: async () => {},
@@ -214,7 +214,7 @@ describe('code-intel MCP server', () => {
         return 'login context';
       },
     };
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge,
       ensureIndex: async () => {},
@@ -251,7 +251,7 @@ describe('code-intel MCP server', () => {
   });
 
   it('compacts changed lines in MCP structured content', async () => {
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge: { async callText(): Promise<string> { return ''; } },
       ensureIndex: async () => {},
@@ -303,7 +303,7 @@ describe('code-intel MCP server', () => {
         return '';
       },
     };
-    const server = createCodeIntelServer({
+    const server = createCodeDeepServer({
       projectPath: '/repo',
       bridge,
       ensureIndex: async (projectPath) => { ensured.push(projectPath); },

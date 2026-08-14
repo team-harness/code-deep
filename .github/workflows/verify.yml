@@ -46,6 +46,12 @@ jobs:
           smoke_dir=$(mktemp -d)
           (cd "$smoke_dir" && npm init --yes >/dev/null)
           npm install --prefix "$smoke_dir" "./$package_file"
-          (cd "$smoke_dir" && node --input-type=module -e "import('@team-harness/code-intel').then(({CodeIntelClient}) => { if (typeof CodeIntelClient !== 'function') process.exit(1); })")
-          "$smoke_dir/node_modules/.bin/code-intel" --help
-          test -x "$smoke_dir/node_modules/.bin/code-intel"
+          (cd "$smoke_dir" && node --input-type=module -e "import('@team-harness/code-deep').then(({CodeDeepClient}) => { if (typeof CodeDeepClient !== 'function') process.exit(1); })")
+          "$smoke_dir/node_modules/.bin/code-deep" --help
+          test -x "$smoke_dir/node_modules/.bin/code-deep"
+          compatibility_package=$(npm pack ./compat/code-intel --silent)
+          compatibility_tarball="$GITHUB_WORKSPACE/$compatibility_package"
+          tar -xOf "$compatibility_tarball" package/package.json | node -e "let input=''; process.stdin.on('data', chunk => input += chunk).on('end', () => { const value = JSON.parse(input); if (value.bin['code-deep'] !== 'cli.js' || value.dependencies['@team-harness/code-deep'] !== require('./package.json').version) process.exit(1); })"
+          npm install --prefix "$smoke_dir" "$compatibility_tarball"
+          "$smoke_dir/node_modules/.bin/code-deep" --version
+          test ! -e "$smoke_dir/node_modules/.bin/code-intel"

@@ -25,7 +25,7 @@ export interface DaemonRecord {
 
 export type ProcessRole =
   | 'launcher'
-  | 'code-intel-mcp'
+  | 'code-deep-mcp'
   | 'codegraph-proxy'
   | 'codegraph-session'
   | 'codegraph-daemon'
@@ -224,7 +224,7 @@ export function buildProcessReport(
 
 export function renderProcessReport(report: ProcessReport): string {
   const lines = [
-    `code-intel processes: ${report.summary.total} across ${report.summary.projects} project(s); ${report.summary.suspects} suspect, ${report.summary.cleanupCandidates} cleanup candidate(s)`,
+    `code-deep processes: ${report.summary.total} across ${report.summary.projects} project(s); ${report.summary.suspects} suspect, ${report.summary.cleanupCandidates} cleanup candidate(s)`,
     '',
     'PID      ROLE                 STATUS             UPTIME    PROJECT',
   ];
@@ -234,7 +234,7 @@ export function renderProcessReport(report: ProcessReport): string {
     );
     for (const evidence of process.evidence) lines.push(`         - ${evidence}`);
   }
-  if (!report.processes.length) lines.push('(no code-intel or CodeGraph processes found)');
+  if (!report.processes.length) lines.push('(no code-deep or CodeGraph processes found)');
   lines.push('', 'Read-only report; no processes or files were changed.');
   return lines.join('\n');
 }
@@ -323,8 +323,8 @@ function classifyRole(command: string, registeredDaemon: boolean): Exclude<Proce
   if (/serve\s+--mcp/.test(command) && /codegraph|npm-shim/i.test(command)) {
     return registeredDaemon ? 'codegraph-daemon' : 'codegraph-session';
   }
-  if (/(?:npm|npx).*@team-harness\/code-intel.*\bmcp\b/.test(command)) return 'launcher';
-  if (/(?:code-intel|dist\/cli\.js).*\bmcp\b/.test(command)) return 'code-intel-mcp';
+  if (/(?:npm|npx).*@team-harness\/(?:code-deep|code-intel).*\bmcp\b/.test(command)) return 'launcher';
+  if (/(?:code-deep|code-intel|dist\/cli\.js).*\bmcp\b/.test(command)) return 'code-deep-mcp';
   return null;
 }
 
@@ -334,8 +334,8 @@ function pathArgument(command: string): string | null {
 }
 
 function commandLabel(role: Exclude<ProcessRole, 'daemon-record'>): string {
-  if (role === 'launcher') return 'npx @team-harness/code-intel mcp';
-  if (role === 'code-intel-mcp') return 'code-intel mcp';
+  if (role === 'launcher') return 'npx @team-harness/code-deep mcp';
+  if (role === 'code-deep-mcp') return 'code-deep mcp';
   if (role === 'codegraph-watchdog') return 'CodeGraph watchdog';
   return 'CodeGraph serve --mcp';
 }

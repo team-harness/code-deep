@@ -28,11 +28,17 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - run: npm ci
-      - name: Verify tag matches package version
+      - name: Verify tag and package versions
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
-      - name: Publish to npm
+        run: |
+          package_version=$(node -p "require('./package.json').version")
+          compatibility_version=$(node -p "require('./compat/code-intel/package.json').version")
+          compatibility_target=$(node -p "require('./compat/code-intel/package.json').dependencies['@team-harness/code-deep']")
+          test "$RELEASE_TAG" = "v$package_version"
+          test "$compatibility_version" = "$package_version"
+          test "$compatibility_target" = "$package_version"
+      - name: Publish code-deep to npm
         run: |
           package_name=$(node -p "require('./package.json').name")
           package_version=$(node -p "require('./package.json').version")
@@ -41,6 +47,16 @@ jobs:
             echo "$package_name@$package_version is already published; skipping npm publish."
           else
             npm publish
+          fi
+      - name: Publish code-intel compatibility package to npm
+        run: |
+          package_name=$(node -p "require('./compat/code-intel/package.json').name")
+          package_version=$(node -p "require('./compat/code-intel/package.json').version")
+          published_version=$(npm view "$package_name@$package_version" version --registry=https://registry.npmjs.org/ 2>/dev/null || true)
+          if [ "$published_version" = "$package_version" ]; then
+            echo "$package_name@$package_version is already published; skipping npm publish."
+          else
+            npm publish ./compat/code-intel
           fi
       - name: Create GitHub Release
         env:

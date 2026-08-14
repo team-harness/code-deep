@@ -308,7 +308,7 @@ ${added}
   });
 
   it('reviews tracked working-tree changes when no diff is supplied', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-review-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-review-'));
     const graph = {
       async callText(name: string): Promise<string> {
         if (name === 'codegraph_node') return '- `answer` (variable) — :1';
@@ -341,7 +341,7 @@ ${added}
   });
 
   it('excludes auto-generated .codegraph files from implicit working-tree review', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-index-pollution-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-index-pollution-'));
     const graph = { async callText(): Promise<string> { return ''; } };
 
     try {
@@ -361,7 +361,7 @@ ${added}
   });
 
   it('renders a clean working tree without empty detail sections', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-clean-review-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-clean-review-'));
     const graph = { async callText(): Promise<string> { return ''; } };
 
     try {
@@ -398,7 +398,7 @@ ${added}
   });
 
   it('reviews an explicit Git base and head range', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-range-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-range-'));
     const graph = {
       async callText(name: string): Promise<string> {
         if (name === 'codegraph_node') return '- `answer` (variable) — :1';
@@ -493,7 +493,7 @@ new file mode 100644
   );
 
   it('queries CodeGraph for project-defined custom extensions', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-custom-extension-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-custom-extension-'));
     const calls: string[] = [];
     const graph = {
       async callText(name: string): Promise<string> {
@@ -551,8 +551,8 @@ new file mode 100644
   });
 
   it.runIf(process.platform !== 'win32')('does not follow untracked symlinks outside the repository', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-symlink-repo-'));
-    const outside = await mkdtemp(join(tmpdir(), 'code-intel-symlink-outside-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-symlink-repo-'));
+    const outside = await mkdtemp(join(tmpdir(), 'code-deep-symlink-outside-'));
     const secret = join(outside, 'secret.txt');
     const graph = { async callText(): Promise<string> { return ''; } };
 
@@ -712,7 +712,7 @@ diff --git a/tests/value.test.ts b/tests/value.test.ts
   });
 
   it('reviews an initialized repository before its first commit', async () => {
-    const repo = await mkdtemp(join(tmpdir(), 'code-intel-no-head-'));
+    const repo = await mkdtemp(join(tmpdir(), 'code-deep-no-head-'));
     const graph = { async callText(): Promise<string> { return ''; } };
 
     try {

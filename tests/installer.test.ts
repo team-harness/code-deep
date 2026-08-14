@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  installCodeIntel,
+  installCodeDeep,
   parseInstallTargets,
 } from '../src/installer.js';
-import { CODE_INTEL_VERSION } from '../src/version.js';
+import { CODE_DEEP_VERSION } from '../src/version.js';
 
-const PACKAGE_SPEC = `@team-harness/code-intel@${CODE_INTEL_VERSION}`;
+const PACKAGE_SPEC = `@team-harness/code-deep@${CODE_DEEP_VERSION}`;
 
-describe('code-intel installer', () => {
+describe('code-deep installer', () => {
   const homes: string[] = [];
 
   afterEach(async () => {
@@ -18,7 +18,7 @@ describe('code-intel installer', () => {
   });
 
   async function makeHome(): Promise<string> {
-    const home = await mkdtemp(join(tmpdir(), 'code-intel-home-'));
+    const home = await mkdtemp(join(tmpdir(), 'code-deep-home-'));
     homes.push(home);
     return home;
   }
@@ -38,15 +38,15 @@ describe('code-intel installer', () => {
     await writeFile(configPath, originalConfig);
     await writeFile(instructionsPath, '# Personal rules\n\n<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->\n');
 
-    const first = await installCodeIntel({ homeDir, targets: ['codex'] });
+    const first = await installCodeDeep({ homeDir, targets: ['codex'] });
     const installedConfig = await readFile(configPath, 'utf8');
     const installedInstructions = await readFile(instructionsPath, 'utf8');
 
     expect(installedConfig).toContain(originalConfig.trimEnd());
-    expect(installedConfig).toContain('[mcp_servers.code-intel]\ncommand = "code-intel"');
+    expect(installedConfig).toContain('[mcp_servers.code-deep]\ncommand = "code-deep"');
     expect(installedConfig).toContain('args = ["mcp"]');
     expect(installedInstructions).toContain('<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->');
-    expect(installedInstructions).toContain('<!-- CODE_INTEL_START -->');
+    expect(installedInstructions).toContain('<!-- CODE_DEEP_START -->');
     expect(installedInstructions).toContain('absolute Git root as `projectPath`');
     expect(installedInstructions).toContain('task goal, relevant symbols or files, and the relationship');
     expect(installedInstructions).toContain('Process `reviewItems` in descending risk order');
@@ -54,16 +54,16 @@ describe('code-intel installer', () => {
     expect(installedInstructions).toContain('run a targeted `explore`');
     expect(installedInstructions).toContain('verify a concrete failure path');
     expect(installedInstructions).toContain('automatically initializes');
-    expect(installedInstructions).not.toContain('ask the user to run `code-intel init`');
-    expect(installedInstructions).toContain('Prefer the code-intel MCP tools');
+    expect(installedInstructions).not.toContain('ask the user to run `code-deep init`');
+    expect(installedInstructions).toContain('Prefer the code-deep MCP tools');
     expect(installedInstructions).toContain('Do not probe or invoke the shell CLI');
-    expect(installedInstructions).toContain('Refer to the capability, server, and tools as `code-intel`');
+    expect(installedInstructions).toContain('Refer to the capability, server, and tools as `code-deep`');
     expect(installedInstructions).toContain('Do not describe a fallback as switching to CodeGraph');
     expect(installedInstructions).toContain(`npx -y ${PACKAGE_SPEC}`);
-    expect(await readFile(`${configPath}.code-intel.bak`, 'utf8')).toBe(originalConfig);
+    expect(await readFile(`${configPath}.code-deep.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);
 
-    const second = await installCodeIntel({ homeDir, targets: ['codex'] });
+    const second = await installCodeDeep({ homeDir, targets: ['codex'] });
     expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged']);
     expect(await readFile(configPath, 'utf8')).toBe(installedConfig);
     expect(await readFile(instructionsPath, 'utf8')).toBe(installedInstructions);
@@ -77,7 +77,7 @@ describe('code-intel installer', () => {
     await writeFile(configPath, [
       'model = "gpt-5"',
       '',
-      '[mcp_servers."code-intel"]',
+      '[mcp_servers."code-deep"]',
       'command = "old-command"',
       'args = ["old"]',
       '',
@@ -86,13 +86,50 @@ describe('code-intel installer', () => {
       '',
     ].join('\n'));
 
-    await installCodeIntel({ homeDir, targets: ['codex'] });
+    await installCodeDeep({ homeDir, targets: ['codex'] });
 
     const installed = await readFile(configPath, 'utf8');
-    expect(installed.match(/\[mcp_servers\.(?:code-intel|"code-intel")\]/g)).toHaveLength(1);
-    expect(installed).toContain('[mcp_servers.code-intel]\ncommand = "code-intel"');
+    expect(installed.match(/\[mcp_servers\.(?:code-deep|"code-deep")\]/g)).toHaveLength(1);
+    expect(installed).toContain('[mcp_servers.code-deep]\ncommand = "code-deep"');
     expect(installed).toContain('args = ["mcp"]');
     expect(installed).toContain('[mcp_servers.existing]\ncommand = "existing"');
+  });
+
+  it('migrates a legacy Codex MCP table and instruction block to code-deep', async () => {
+    const homeDir = await makeHome();
+    const codexDir = join(homeDir, '.codex');
+    await mkdir(codexDir, { recursive: true });
+    const configPath = join(codexDir, 'config.toml');
+    const instructionsPath = join(codexDir, 'AGENTS.md');
+    await writeFile(configPath, [
+      'model = "gpt-5"',
+      '',
+      '[mcp_servers.code-intel]',
+      'command = "code-intel"',
+      'args = ["mcp"]',
+      '',
+      '[mcp_servers.existing]',
+      'command = "existing"',
+      '',
+    ].join('\n'));
+    await writeFile(instructionsPath, [
+      '# Personal rules',
+      '',
+      '<!-- CODE_INTEL_START -->',
+      'legacy instructions',
+      '<!-- CODE_INTEL_END -->',
+      '',
+    ].join('\n'));
+
+    await installCodeDeep({ homeDir, targets: ['codex'] });
+
+    const config = await readFile(configPath, 'utf8');
+    const instructions = await readFile(instructionsPath, 'utf8');
+    expect(config).toContain('[mcp_servers.code-deep]\ncommand = "code-deep"');
+    expect(config).not.toContain('[mcp_servers.code-intel]');
+    expect(config).toContain('[mcp_servers.existing]\ncommand = "existing"');
+    expect(instructions).toContain('<!-- CODE_DEEP_START -->');
+    expect(instructions).not.toContain('<!-- CODE_INTEL_START -->');
   });
 
   it('refuses an already duplicated equivalent Codex MCP table', async () => {
@@ -101,33 +138,33 @@ describe('code-intel installer', () => {
     await mkdir(codexDir, { recursive: true });
     const configPath = join(codexDir, 'config.toml');
     const duplicated = [
-      '[mcp_servers.code-intel]',
+      '[mcp_servers.code-deep]',
       'command = "one"',
       '',
-      '[mcp_servers."code-intel"]',
+      '[mcp_servers."code-deep"]',
       'command = "two"',
       '',
     ].join('\n');
     await writeFile(configPath, duplicated);
 
-    await expect(installCodeIntel({ homeDir, targets: ['codex'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['codex'] }))
       .rejects.toThrow('declared more than once');
     expect(await readFile(configPath, 'utf8')).toBe(duplicated);
   });
 
   it.each([
-    ['parent inline', '[mcp_servers]\n"code-intel" = { command = "old" }\n'],
-    ['parent dotted', '[mcp_servers]\n"code-intel".command = "old"\n'],
-    ['root inline', 'mcp_servers = { "code-intel" = { command = "old" } }\n'],
-    ['root dotted', 'mcp_servers."code-intel".command = "old"\n'],
-  ])('refuses the %s code-intel TOML representation', async (_name, existing) => {
+    ['parent inline', '[mcp_servers]\n"code-deep" = { command = "old" }\n'],
+    ['parent dotted', '[mcp_servers]\n"code-deep".command = "old"\n'],
+    ['root inline', 'mcp_servers = { "code-deep" = { command = "old" } }\n'],
+    ['root dotted', 'mcp_servers."code-deep".command = "old"\n'],
+  ])('refuses the %s code-deep TOML representation', async (_name, existing) => {
     const homeDir = await makeHome();
     const codexDir = join(homeDir, '.codex');
     await mkdir(codexDir, { recursive: true });
     const configPath = join(codexDir, 'config.toml');
     await writeFile(configPath, existing);
 
-    await expect(installCodeIntel({ homeDir, targets: ['codex'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['codex'] }))
       .rejects.toThrow('inline or dotted representation');
     expect(await readFile(configPath, 'utf8')).toBe(existing);
   });
@@ -143,24 +180,54 @@ describe('code-intel installer', () => {
     await writeFile(settingsPath, JSON.stringify({ permissions: { allow: ['Bash(git status:*)'] } }, null, 2));
     await writeFile(instructionsPath, '# Existing Claude rules\n');
 
-    const first = await installCodeIntel({ homeDir, targets: ['claude'] });
+    const first = await installCodeDeep({ homeDir, targets: ['claude'] });
     const mcp = JSON.parse(await readFile(mcpPath, 'utf8')) as Record<string, any>;
     const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, any>;
     const instructions = await readFile(instructionsPath, 'utf8');
 
     expect(mcp.theme).toBe('dark');
     expect(mcp.mcpServers.existing).toEqual({ command: 'keep' });
-    expect(mcp.mcpServers['code-intel']).toEqual({
+    expect(mcp.mcpServers['code-deep']).toEqual({
       type: 'stdio',
-      command: 'code-intel',
+      command: 'code-deep',
       args: ['mcp'],
     });
-    expect(settings.permissions.allow).toEqual(['Bash(git status:*)', 'mcp__code-intel__*']);
-    expect(instructions).toContain('<!-- CODE_INTEL_START -->');
+    expect(settings.permissions.allow).toEqual(['Bash(git status:*)', 'mcp__code-deep__*']);
+    expect(instructions).toContain('<!-- CODE_DEEP_START -->');
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated', 'updated']);
 
-    const second = await installCodeIntel({ homeDir, targets: ['claude'] });
+    const second = await installCodeDeep({ homeDir, targets: ['claude'] });
     expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged', 'unchanged']);
+  });
+
+  it('migrates legacy Claude MCP configuration and permission to code-deep', async () => {
+    const homeDir = await makeHome();
+    const claudeDir = join(homeDir, '.claude');
+    await mkdir(claudeDir, { recursive: true });
+    const mcpPath = join(homeDir, '.claude.json');
+    const settingsPath = join(claudeDir, 'settings.json');
+    await writeFile(mcpPath, JSON.stringify({
+      mcpServers: {
+        existing: { command: 'keep' },
+        'code-intel': { type: 'stdio', command: 'code-intel', args: ['mcp'] },
+      },
+    }, null, 2));
+    await writeFile(settingsPath, JSON.stringify({
+      permissions: { allow: ['mcp__code-intel__*', 'Bash(git status:*)'] },
+    }, null, 2));
+
+    await installCodeDeep({ homeDir, targets: ['claude'] });
+
+    const mcp = JSON.parse(await readFile(mcpPath, 'utf8')) as Record<string, any>;
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, any>;
+    expect(mcp.mcpServers['code-deep']).toEqual({
+      type: 'stdio',
+      command: 'code-deep',
+      args: ['mcp'],
+    });
+    expect(mcp.mcpServers['code-intel']).toBeUndefined();
+    expect(mcp.mcpServers.existing).toEqual({ command: 'keep' });
+    expect(settings.permissions.allow).toEqual(['Bash(git status:*)', 'mcp__code-deep__*']);
   });
 
   it('refuses to overwrite malformed JSON', async () => {
@@ -168,7 +235,7 @@ describe('code-intel installer', () => {
     const malformed = '{ not-json';
     await writeFile(join(homeDir, '.claude.json'), malformed);
 
-    await expect(installCodeIntel({ homeDir, targets: ['claude'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['claude'] }))
       .rejects.toThrow('Cannot parse');
     expect(await readFile(join(homeDir, '.claude.json'), 'utf8')).toBe(malformed);
   });

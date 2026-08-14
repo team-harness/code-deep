@@ -1,15 +1,15 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from '../src/index.js';
-import { CodeIntelClient } from '../src/index.js';
+import { CodeDeepClient } from '../src/index.js';
 
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codegraph-server.mjs', import.meta.url),
 );
 
-describe('CodeIntelClient', () => {
+describe('CodeDeepClient', () => {
   it('exposes explore and review over one persistent CodeGraph connection', async () => {
-    const client = new CodeIntelClient({
+    const client = new CodeDeepClient({
       projectPath: process.cwd(),
       command: process.execPath,
       args: [fixture],
@@ -55,13 +55,13 @@ describe('CodeIntelClient', () => {
   it('keeps bridge and analyzer implementation details out of the root API', () => {
     const exports = publicApi as Record<string, unknown>;
 
-    expect(exports.CodeIntelClient).toBe(CodeIntelClient);
+    expect(exports.CodeDeepClient).toBe(CodeDeepClient);
     expect(exports.CodeGraphBridge).toBeUndefined();
     expect(exports.ReviewAnalyzer).toBeUndefined();
   });
 
   it('validates review mode before attempting automatic initialization', async () => {
-    const client = new CodeIntelClient({
+    const client = new CodeDeepClient({
       projectPath: '/not-a-git-repository',
       command: process.execPath,
       args: [fixture],

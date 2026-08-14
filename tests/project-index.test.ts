@@ -18,12 +18,12 @@ describe('initializeProjectIndex', () => {
   });
 
   async function makeProject(): Promise<string> {
-    const path = await mkdtemp(join(tmpdir(), 'code-intel-init-'));
+    const path = await mkdtemp(join(tmpdir(), 'code-deep-init-'));
     temporaryDirectories.push(path);
     return path;
   }
 
-  it('initializes a new project with code-intel-owned output', async () => {
+  it('initializes a new project with code-deep-owned output', async () => {
     const projectPath = await makeProject();
     const calls: string[][] = [];
     const output: string[] = [];
@@ -38,8 +38,8 @@ describe('initializeProjectIndex', () => {
     });
 
     expect(calls).toEqual([['init', projectPath]]);
-    expect(output.join('')).toContain(`Initializing code-intel index in ${projectPath}`);
-    expect(output.join('')).toContain(`Initialized code-intel index in ${projectPath}`);
+    expect(output.join('')).toContain(`Initializing code-deep index in ${projectPath}`);
+    expect(output.join('')).toContain(`Initialized code-deep index in ${projectPath}`);
     expect(output.join('')).not.toContain('CodeGraph');
   });
 
@@ -61,8 +61,8 @@ describe('initializeProjectIndex', () => {
     });
 
     expect(calls).toEqual([['sync', projectPath, '--quiet']]);
-    expect(output.join('')).toContain(`Refreshing code-intel index in ${projectPath}`);
-    expect(output.join('')).toContain(`Refreshed code-intel index in ${projectPath}`);
+    expect(output.join('')).toContain(`Refreshing code-deep index in ${projectPath}`);
+    expect(output.join('')).toContain(`Refreshed code-deep index in ${projectPath}`);
     expect(output.join('')).not.toContain('codegraph sync');
   });
 
@@ -87,8 +87,8 @@ describe('initializeProjectIndex', () => {
     });
 
     expect(calls).toEqual([['init', projectPath]]);
-    expect(output.join('')).toContain(`Initializing code-intel index in ${projectPath}`);
-    expect(output.join('')).not.toContain('Refreshing code-intel index');
+    expect(output.join('')).toContain(`Initializing code-deep index in ${projectPath}`);
+    expect(output.join('')).not.toContain('Refreshing code-deep index');
   });
 
   it('rewrites backend branding and commands in failure diagnostics', async () => {
@@ -100,7 +100,7 @@ describe('initializeProjectIndex', () => {
     });
 
     await expect(initializeProjectIndex(projectPath, { run, write: () => {} }))
-      .rejects.toThrow('code-intel failed. Run "code-intel init".');
+      .rejects.toThrow('code-deep failed. Run "code-deep init".');
   });
 });
 
@@ -114,7 +114,7 @@ describe('ensureProjectIndex', () => {
   });
 
   async function makeWorkspace(): Promise<string> {
-    const path = await mkdtemp(join(tmpdir(), 'code-intel-ensure-'));
+    const path = await mkdtemp(join(tmpdir(), 'code-deep-ensure-'));
     temporaryDirectories.push(path);
     return path;
   }

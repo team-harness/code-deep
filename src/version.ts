@@ -6,5 +6,5 @@ const packageJson = require('../package.json') as {
   dependencies: Record<string, string>;
 };
 
-export const CODE_INTEL_VERSION = packageJson.version;
+export const CODE_DEEP_VERSION = packageJson.version;
 export const CODEGRAPH_VERSION = packageJson.dependencies['@colbymchenry/codegraph'];

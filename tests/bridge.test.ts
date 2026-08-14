@@ -53,7 +53,7 @@ describe('CodeGraphBridge', () => {
   });
 
   it('reconnects and retries once when the child exits during a call', async () => {
-    const temp = await mkdtemp(join(tmpdir(), 'code-intel-bridge-'));
+    const temp = await mkdtemp(join(tmpdir(), 'code-deep-bridge-'));
     const bridge = new CodeGraphBridge({
       projectPath: process.cwd(),
       command: process.execPath,

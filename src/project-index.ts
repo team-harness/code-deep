@@ -29,7 +29,7 @@ export async function ensureProjectIndex(
   const existingRoot = await findIndexRoot(projectPath, repositoryRoot);
   if (existingRoot) return;
   if (!repositoryRoot) {
-    throw new Error(`Automatic code-intel initialization requires a Git repository: ${projectPath}`);
+    throw new Error(`Automatic code-deep initialization requires a Git repository: ${projectPath}`);
   }
 
   const pending = pendingInitializations.get(repositoryRoot);
@@ -40,7 +40,7 @@ export async function ensureProjectIndex(
     write: () => {},
   }).then(async () => {
     if (!await isDirectory(join(repositoryRoot, '.codegraph'))) {
-      throw new Error(`code-intel initialization completed without creating ${join(repositoryRoot, '.codegraph')}`);
+      throw new Error(`code-deep initialization completed without creating ${join(repositoryRoot, '.codegraph')}`);
     }
   }).catch(async (error: unknown) => {
     // Another process may have created the directory; a successful sync proves
@@ -77,13 +77,13 @@ export async function initializeProjectIndex(
     : ['init', targetPath];
   const write = options.write ?? ((text: string) => process.stdout.write(text));
 
-  write(`${action} code-intel index in ${targetPath}...\n`);
+  write(`${action} code-deep index in ${targetPath}...\n`);
   const result = await (options.run ?? runCodeGraphCommand)(args);
   if (result.exitCode !== 0) {
     const detail = sanitizeBackendOutput(result.stderr.trim() || result.stdout.trim());
-    throw new Error(detail || `code-intel index command exited with code ${result.exitCode}`);
+    throw new Error(detail || `code-deep index command exited with code ${result.exitCode}`);
   }
-  write(`${completed} code-intel index in ${targetPath}.\n`);
+  write(`${completed} code-deep index in ${targetPath}.\n`);
 }
 
 async function findIndexRoot(
@@ -147,7 +147,7 @@ async function runCodeGraphCommand(args: string[]): Promise<CodeGraphCommandResu
   const exitCode = await new Promise<number>((resolveExit, reject) => {
     child.once('error', reject);
     child.once('exit', (code, signal) => {
-      if (signal) reject(new Error(`code-intel index process exited from signal ${signal}`));
+      if (signal) reject(new Error(`code-deep index process exited from signal ${signal}`));
       else resolveExit(code ?? 1);
     });
   });
@@ -156,10 +156,10 @@ async function runCodeGraphCommand(args: string[]): Promise<CodeGraphCommandResu
 
 function sanitizeBackendOutput(output: string): string {
   return output
-    .replace(/"codegraph index" or "codegraph sync"/gi, '"code-intel init"')
-    .replace(/codegraph (?:index|sync)/gi, 'code-intel init')
-    .replace(/CodeGraph/g, 'code-intel')
-    .replace(/codegraph/g, 'code-intel');
+    .replace(/"codegraph index" or "codegraph sync"/gi, '"code-deep init"')
+    .replace(/codegraph (?:index|sync)/gi, 'code-deep init')
+    .replace(/CodeGraph/g, 'code-deep')
+    .replace(/codegraph/g, 'code-deep');
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

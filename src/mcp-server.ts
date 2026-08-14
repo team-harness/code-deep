@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { GraphReader, ReviewReport } from './review.js';
 import { renderReviewMarkdown, ReviewAnalyzer, validateReviewRequest } from './review.js';
 import { ensureProjectIndex } from './project-index.js';
-import { CODE_INTEL_VERSION } from './version.js';
+import { CODE_DEEP_VERSION } from './version.js';
 
 const ExploreInput = z.object({
   query: z.string().min(1),
@@ -35,9 +35,9 @@ const MAY_INITIALIZE_INDEX = {
 } as const;
 
 const SERVER_INSTRUCTIONS = [
-  'Prefer these code-intel MCP tools over shell commands.',
-  'Do not probe the code-intel CLI when MCP tools are available.',
-  'Refer to this capability as code-intel in user-facing messages. Do not tell the user you are switching to CodeGraph, which is only the internal backend.',
+  'Prefer these code-deep MCP tools over shell commands.',
+  'Do not probe the code-deep CLI when MCP tools are available.',
+  'Refer to this capability as code-deep in user-facing messages. Do not tell the user you are switching to CodeGraph, which is only the internal backend.',
   'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace.',
   'Missing Git worktree indexes are initialized automatically before either tool runs.',
   'After changes use review for the working tree or a base/head range.',
@@ -154,7 +154,7 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
 const TOOLS: Tool[] = [
   {
     name: 'explore',
-    description: 'Use code-intel to explore focused source, call paths, and blast radius before broad reading or editing. Automatically initializes a missing worktree index. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
+    description: 'Use code-deep to explore focused source, call paths, and blast radius before broad reading or editing. Automatically initializes a missing worktree index. State the task goal, symbols/files, and relationship to trace; use targeted follow-ups when review reports warnings or omissions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -169,7 +169,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'review',
-    description: 'Use code-intel to build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
+    description: 'Use code-deep to build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -193,15 +193,15 @@ const TOOLS: Tool[] = [
   },
 ];
 
-export interface CodeIntelServerOptions {
+export interface CodeDeepServerOptions {
   projectPath: string;
   bridge: GraphReader & { ensureProjectIndex?: (projectPath?: string) => Promise<void> };
   ensureIndex?: (projectPath: string) => Promise<void>;
 }
 
-export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
+export function createCodeDeepServer(options: CodeDeepServerOptions): Server {
   const server = new Server(
-    { name: 'code-intel', version: CODE_INTEL_VERSION },
+    { name: 'code-deep', version: CODE_DEEP_VERSION },
     {
       capabilities: { tools: {} },
       instructions: SERVER_INSTRUCTIONS,
@@ -245,7 +245,7 @@ export function createCodeIntelServer(options: CodeIntelServerOptions): Server {
   return server;
 }
 
-function indexEnsurer(options: CodeIntelServerOptions): (projectPath: string) => Promise<void> {
+function indexEnsurer(options: CodeDeepServerOptions): (projectPath: string) => Promise<void> {
   if (options.ensureIndex) return options.ensureIndex;
   if (options.bridge.ensureProjectIndex) {
     return (projectPath) => options.bridge.ensureProjectIndex!(projectPath);

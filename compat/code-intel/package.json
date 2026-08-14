@@ -1,0 +1,28 @@
+{
+  "name": "@team-harness/code-intel",
+  "version": "2.0.0",
+  "description": "Compatibility installer for @team-harness/code-deep",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/team-harness/code-deep.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "bin": {
+    "code-deep": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0 <25.0.0"
+  },
+  "dependencies": {
+    "@team-harness/code-deep": "2.0.0"
+  }
+}

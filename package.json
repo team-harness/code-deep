@@ -1,19 +1,19 @@
 {
-  "name": "@team-harness/code-intel",
-  "version": "1.5.11",
+  "name": "@team-harness/code-deep",
+  "version": "2.0.0",
   "description": "Persistent MCP code intelligence and review bridge powered by CodeGraph",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/team-harness/code-intel.git"
+    "url": "git+https://github.com/team-harness/code-deep.git"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "bin": {
-    "code-intel": "dist/cli.js"
+    "code-deep": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

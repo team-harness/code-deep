@@ -9,7 +9,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolveCodeGraphBin } from './codegraph-bin.js';
 import { ensureProjectIndex } from './project-index.js';
-import { CODE_INTEL_VERSION } from './version.js';
+import { CODE_DEEP_VERSION } from './version.js';
 
 export interface CodeGraphBridgeOptions {
   projectPath: string;
@@ -94,7 +94,7 @@ export class CodeGraphBridge {
     const params = this.serverParameters();
     const transport = new StdioClientTransport(params);
     const client = new Client(
-      { name: 'code-intel-bridge', version: CODE_INTEL_VERSION },
+      { name: 'code-deep-bridge', version: CODE_DEEP_VERSION },
       { capabilities: {} },
     );
 

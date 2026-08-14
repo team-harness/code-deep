@@ -4,25 +4,25 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command } from 'commander';
-import { CodeIntelClient } from './client.js';
+import { CodeDeepClient } from './client.js';
 import { CodeGraphBridge } from './codegraph-bridge.js';
-import { installCodeIntel, parseInstallTargets } from './installer.js';
-import { createCodeIntelServer } from './mcp-server.js';
+import { installCodeDeep, parseInstallTargets } from './installer.js';
+import { createCodeDeepServer } from './mcp-server.js';
 import { initializeProjectIndex } from './project-index.js';
 import { collectProcessReport, renderProcessReport } from './process-report.js';
-import { CODE_INTEL_VERSION } from './version.js';
+import { CODE_DEEP_VERSION } from './version.js';
 
 const program = new Command()
-  .name('code-intel')
+  .name('code-deep')
   .description('Persistent CodeGraph MCP bridge for code exploration and review')
-  .version(CODE_INTEL_VERSION);
+  .version(CODE_DEEP_VERSION);
 
 program
   .command('install')
-  .description('Install code-intel MCP and agent instructions')
+  .description('Install code-deep MCP and agent instructions')
   .requiredOption('--target <targets>', 'Comma-separated targets: codex,claude')
   .action(async (options: { target: string }) => {
-    const result = await installCodeIntel({
+    const result = await installCodeDeep({
       homeDir: homedir(),
       targets: parseInstallTargets(options.target),
     });
@@ -35,7 +35,7 @@ program
 program
   .command('ps')
   .alias('processes')
-  .description('Inspect code-intel and CodeGraph process health (read-only)')
+  .description('Inspect code-deep and CodeGraph process health (read-only)')
   .option('--json', 'Print the versioned JSON report')
   .action(async (options: { json?: boolean }) => {
     const report = await collectProcessReport();
@@ -46,12 +46,12 @@ program
 
 program
   .command('mcp')
-  .description('Run the code-intel MCP server over stdio')
+  .description('Run the code-deep MCP server over stdio')
   .option('-p, --path <path>', 'Project root', process.cwd())
   .action(async (options: { path: string }) => {
     const projectPath = resolve(options.path);
     const bridge = new CodeGraphBridge({ projectPath });
-    const server = createCodeIntelServer({ projectPath, bridge });
+    const server = createCodeDeepServer({ projectPath, bridge });
     let closing = false;
     const close = async (): Promise<void> => {
       if (closing) return;
@@ -66,7 +66,7 @@ program
 
 program
   .command('init [path]')
-  .description('Initialize or refresh the code-intel index for a project')
+  .description('Initialize or refresh the code-deep index for a project')
   .action(async (path = process.cwd()) => {
     await initializeProjectIndex(path);
   });
@@ -78,7 +78,7 @@ program
   .option('--max-files <count>', 'Maximum source files', parsePositiveInteger, 12)
   .action(async (query: string[], options: { path: string; maxFiles: number }) => {
     const projectPath = resolve(options.path);
-    const client = new CodeIntelClient({ projectPath });
+    const client = new CodeDeepClient({ projectPath });
     try {
       const text = await client.explore(query.join(' '), { maxFiles: options.maxFiles });
       process.stdout.write(`${text}\n`);
@@ -98,7 +98,7 @@ program
     options: { base?: string; head?: string; json?: boolean },
   ) => {
     const projectPath = resolve(path);
-    const client = new CodeIntelClient({ projectPath });
+    const client = new CodeDeepClient({ projectPath });
     try {
       const report = await client.review({
         base: options.base,
@@ -121,6 +121,6 @@ function parsePositiveInteger(value: string): number {
 }
 
 program.parseAsync(process.argv).catch((error: unknown) => {
-  process.stderr.write(`code-intel: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`code-deep: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 });
