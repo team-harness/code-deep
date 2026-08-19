@@ -11,10 +11,14 @@ import { renderReviewMarkdown, ReviewAnalyzer, validateReviewRequest } from './r
 import { ensureProjectIndex } from './project-index.js';
 import { CODE_DEEP_VERSION } from './version.js';
 
+const EXPLORE_MAX_FILES = { min: 1, max: 50, default: 12 } as const;
+const REVIEW_MAX_FILES = { min: 1, max: 100, default: 20 } as const;
+const REVIEW_MAX_SYMBOLS = { min: 1, max: 50, default: 12 } as const;
+
 const ExploreInput = z.object({
   query: z.string().min(1),
   projectPath: z.string().min(1).optional(),
-  maxFiles: z.number().int().min(1).max(50).default(12),
+  maxFiles: z.number().int().min(EXPLORE_MAX_FILES.min).max(EXPLORE_MAX_FILES.max).default(EXPLORE_MAX_FILES.default),
 });
 
 const ReviewInput = z.object({
@@ -22,8 +26,8 @@ const ReviewInput = z.object({
   diff: z.string().optional(),
   base: z.string().trim().min(1).optional(),
   head: z.string().trim().min(1).optional(),
-  maxFiles: z.number().int().min(1).max(100).optional(),
-  maxSymbols: z.number().int().min(1).max(50).optional(),
+  maxFiles: z.number().int().min(REVIEW_MAX_FILES.min).max(REVIEW_MAX_FILES.max).optional(),
+  maxSymbols: z.number().int().min(REVIEW_MAX_SYMBOLS.min).max(REVIEW_MAX_SYMBOLS.max).optional(),
   detailLevel: z.enum(['minimal', 'standard']).default('minimal'),
 });
 
@@ -41,7 +45,7 @@ const SERVER_INSTRUCTIONS = [
   'Use explore before broad reading/editing, with an absolute Git root and a query containing the task goal, symbols/files, and relationship to trace.',
   'Missing Git worktree indexes are initialized automatically before either tool runs.',
   'After changes use review for the working tree or a base/head range.',
-  'Review defaults to detailLevel minimal; request standard when you need the bounded diff, complete review items, impact compatibility view, or graph context.',
+  'Review defaults to detailLevel minimal; request standard when you need the bounded diff, complete review items, impact compatibility view, or graph context. Review projectPath is an absolute Git root and defaults to the server project when omitted. Choose exactly one source mode: omit diff/base/head for the current working tree, provide diff for a caller-supplied unified diff, or provide base with optional head for a Git range; diff cannot be combined with base/head and head requires base. Review maxFiles is an integer from 1 to 100 (default 20) and limits deeply analyzed changed files. Review maxSymbols is an integer from 1 to 50 (default 12) and limits mapped changed symbols queried for impact; do not send values above these hard limits. Both limits affect deep analysis only; global diff totals and risk signals still use the complete diff.',
   'Process reviewItems in descending risk order. Warnings, low confidence, or omitted files/symbols require targeted explore follow-ups.',
   'Risk prioritizes attention and does not prove a bug; verify a concrete failure path before emitting a comment.',
   'Both tools leave source files unchanged and share one persistent internal backend connection.',
@@ -158,9 +162,9 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Task goal plus relevant symbols/files and the relationship to trace, such as callers, callees, data flow, or blast radius.' },
-        projectPath: { type: 'string', description: 'The absolute Git root. Always provide it when the MCP server is installed globally or can serve multiple repositories.' },
-        maxFiles: { type: 'number', minimum: 1, maximum: 50, default: 12, description: 'Maximum focused source files returned.' },
+        query: { type: 'string', minLength: 1, description: 'Required focused exploration goal. Include relevant symbols/files and the relationship to trace, such as callers, callees, data flow, or blast radius.' },
+        projectPath: { type: 'string', minLength: 1, description: 'Path to the absolute Git root. Defaults to the server project when omitted; provide it explicitly when the MCP server is installed globally or can serve multiple repositories.' },
+        maxFiles: { type: 'number', minimum: EXPLORE_MAX_FILES.min, maximum: EXPLORE_MAX_FILES.max, default: EXPLORE_MAX_FILES.default, description: 'Maximum focused source files returned. Integer 1-50; default 12. This bounds the focused source response, not the repository scan.' },
       },
       required: ['query'],
       additionalProperties: false,
@@ -169,21 +173,21 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'review',
-    description: 'Use code-deep to build a structured, diff-aware review and automatically initialize a missing worktree index. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
+    description: 'Use code-deep to build a structured, diff-aware review and automatically initialize a missing worktree index. Choose exactly one source mode (current working tree, caller-supplied diff, or base/head range); diff cannot be combined with base/head and head requires base. Process reviewItems in descending risk order, inspect warnings/omissions, use targeted explore follow-ups, and verify a concrete failure path before emitting a review comment.',
     inputSchema: {
       type: 'object',
       properties: {
-        projectPath: { type: 'string', description: 'Absolute Git root. Use the same projectPath supplied to explore.' },
-        diff: { type: 'string', description: 'Caller-supplied unified diff. Cannot be combined with base or head; omit to read Git.' },
-        base: { type: 'string', description: 'Git base revision. Omit for the current working tree.' },
-        head: { type: 'string', description: 'Git head revision; requires base and defaults to HEAD.' },
-        maxFiles: { type: 'number', minimum: 1, maximum: 100, default: 20 },
-        maxSymbols: { type: 'number', minimum: 1, maximum: 50, default: 12 },
+        projectPath: { type: 'string', minLength: 1, description: 'Absolute Git root. Defaults to the server project when omitted; use the same projectPath supplied to explore.' },
+        diff: { type: 'string', description: 'Caller-supplied unified diff. Use this as the only source selector; it cannot be combined with base or head. Omit it to read Git.' },
+        base: { type: 'string', minLength: 1, description: 'Git base revision for a range review. Required when head is provided; omit base/head for the current working tree.' },
+        head: { type: 'string', minLength: 1, description: 'Git head revision for a range review. Optional and defaults to HEAD when base is provided; requires base.' },
+        maxFiles: { type: 'number', minimum: REVIEW_MAX_FILES.min, maximum: REVIEW_MAX_FILES.max, default: REVIEW_MAX_FILES.default, description: 'Maximum changed files to deeply analyze. Integer 1-100; default 20. It bounds symbol lookup, patch projection, and graph analysis only; all changed-file totals and global risk signals still use the complete diff.' },
+        maxSymbols: { type: 'number', minimum: REVIEW_MAX_SYMBOLS.min, maximum: REVIEW_MAX_SYMBOLS.max, default: REVIEW_MAX_SYMBOLS.default, description: 'Maximum mapped changed symbols to query for impact. Integer 1-50; default 12. This is a hard limit: values above 50 are rejected. It affects deep symbol/impact analysis only; global diff totals and risk signals still use the complete diff.' },
         detailLevel: {
           type: 'string',
           enum: ['minimal', 'standard'],
           default: 'minimal',
-          description: 'minimal returns priorities and risk without diff/context; standard adds the complete report and bounded diff.',
+          description: 'Response projection, not analysis scope. minimal returns priorities/risk, compact ranges, and the top three items without diff/context; standard adds the complete report, bounded diff, impact compatibility view, and graph context.',
         },
       },
       additionalProperties: false,
@@ -238,7 +242,7 @@ export function createCodeDeepServer(options: CodeDeepServerOptions): Server {
 
       return errorResult(`Unknown tool: ${request.params.name}`);
     } catch (error) {
-      return errorResult(error instanceof Error ? error.message : String(error));
+      return errorResult(formatToolError(error, request.params.name));
     }
   });
 
@@ -312,4 +316,43 @@ function errorResult(message: string): CallToolResult {
     isError: true,
     content: [{ type: 'text', text: message }],
   };
+}
+
+function formatToolError(error: unknown, toolName: string): string {
+  if (!(error instanceof z.ZodError)) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === 'head requires base') {
+      return 'Invalid review input: head requires base. Provide base with head, or omit head.';
+    }
+    if (message === 'diff cannot be combined with base or head') {
+      return 'Invalid review input: diff cannot be combined with base or head. Choose one source mode: diff, base/head, or the current working tree.';
+    }
+    if (message === 'base must not be empty' || message === 'head must not be empty') {
+      return `Invalid review input: ${message}. Provide a non-empty Git revision.`;
+    }
+    return message;
+  }
+
+  const issues = error.issues.map((issue) => {
+    const path = issue.path.join('.') || 'input';
+    const guidance = path === 'query'
+      ? 'query is required and must be non-empty; state the goal, relevant symbols/files, and relationship to trace.'
+      : path === 'projectPath'
+        ? 'projectPath must be a non-empty path to an absolute Git root.'
+        : path === 'diff'
+          ? 'diff must be a caller-supplied unified diff and cannot be combined with base or head.'
+          : path === 'base' || path === 'head'
+            ? `${path} must be a non-empty Git revision.`
+            : path === 'maxFiles'
+              ? toolName === 'explore'
+                ? `maxFiles must be an integer from ${EXPLORE_MAX_FILES.min} to ${EXPLORE_MAX_FILES.max} (default ${EXPLORE_MAX_FILES.default}); it limits focused source files returned.`
+                : `maxFiles must be an integer from ${REVIEW_MAX_FILES.min} to ${REVIEW_MAX_FILES.max} (default ${REVIEW_MAX_FILES.default}); it limits deep file analysis only.`
+              : path === 'maxSymbols'
+                ? `maxSymbols must be an integer from ${REVIEW_MAX_SYMBOLS.min} to ${REVIEW_MAX_SYMBOLS.max} (default ${REVIEW_MAX_SYMBOLS.default}); it limits mapped symbols queried for impact only.`
+                : path === 'detailLevel'
+                  ? 'detailLevel must be either "minimal" (default) or "standard".'
+                  : issue.message;
+    return `${path}: ${guidance}`;
+  });
+  return `Invalid ${toolName} input. ${issues.join(' ')} Do not retry with the same invalid value.`;
 }

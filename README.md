@@ -129,6 +129,21 @@ the diff or graph context. `reviewItemsOmitted` makes any response-only
 truncation explicit. Use `detailLevel: "standard"` when the complete
 bounded diff, impact compatibility view, and graph context are needed.
 
+Review input limits are explicit: `maxFiles` is an integer from `1` to `100`
+(default `20`) and bounds deep file, symbol, patch, and graph analysis;
+`maxSymbols` is an integer from `1` to `50` (default `12`) and bounds mapped
+symbols queried for impact. Values above these hard limits are rejected. Neither
+parameter truncates the complete-diff totals or global risk signals, so use them
+to control analysis breadth rather than to hide changed files or risk.
+
+Other review inputs are explicit as well: `projectPath` is the absolute Git root
+and defaults to the server project; choose one source mode (current working tree,
+caller-supplied `diff`, or `base` with optional `head`). `diff` cannot be combined
+with `base`/`head`, and `head` requires `base` (defaulting to `HEAD`).
+`detailLevel` controls only the response projection: `minimal` is the default and
+returns priorities, risk, compact ranges, and the top three items; `standard`
+adds the bounded diff, complete items, impact view, and graph context.
+
 ## Process diagnostics
 
 Inspect the local code-deep wrappers, CodeGraph proxies, shared project daemons,

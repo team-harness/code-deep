@@ -44,13 +44,36 @@ describe('code-deep MCP server', () => {
     expect(tools.tools[0]?.annotations?.readOnlyHint).toBe(false);
     expect(tools.tools[0]?.inputSchema.properties?.projectPath?.description)
       .toContain('absolute Git root');
+    expect(tools.tools[0]?.inputSchema.properties?.query?.description)
+      .toContain('Required focused exploration goal');
     expect(tools.tools[1]?.description).toContain('descending risk order');
+    expect(tools.tools[1]?.description).toContain('Choose exactly one source mode');
+    expect(tools.tools[1]?.inputSchema.properties?.diff?.description)
+      .toContain('only source selector');
+    expect(tools.tools[1]?.inputSchema.properties?.head?.description)
+      .toContain('requires base');
     expect(tools.tools[1]?.annotations?.readOnlyHint).toBe(false);
     expect(tools.tools[1]?.inputSchema.properties?.detailLevel).toMatchObject({
       type: 'string',
       enum: ['minimal', 'standard'],
       default: 'minimal',
     });
+    expect(tools.tools[1]?.inputSchema.properties?.maxFiles).toMatchObject({
+      minimum: 1,
+      maximum: 100,
+      default: 20,
+    });
+    expect(tools.tools[1]?.inputSchema.properties?.maxFiles?.description)
+      .toContain('Integer 1-100');
+    expect(tools.tools[1]?.inputSchema.properties?.maxSymbols).toMatchObject({
+      minimum: 1,
+      maximum: 50,
+      default: 12,
+    });
+    expect(tools.tools[1]?.inputSchema.properties?.maxSymbols?.description)
+      .toContain('hard limit');
+    expect(tools.tools[1]?.inputSchema.properties?.maxSymbols?.description)
+      .toContain('global diff totals');
     expect(tools.tools[1]?.inputSchema).not.toHaveProperty('allOf');
     expect(tools.tools[1]?.inputSchema).not.toHaveProperty('oneOf');
     expect(tools.tools[1]?.inputSchema).not.toHaveProperty('anyOf');
@@ -330,5 +353,68 @@ describe('code-deep MCP server', () => {
     }));
     expect(calls).toEqual([]);
     expect(ensured).toEqual([]);
+  });
+
+  it('returns actionable guidance when review limits are out of range', async () => {
+    const calls: string[] = [];
+    const server = createCodeDeepServer({
+      projectPath: '/repo',
+      bridge: {
+        async callText(name: string): Promise<string> {
+          calls.push(name);
+          return '';
+        },
+      },
+      ensureIndex: async () => {},
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: 'review',
+      arguments: { maxSymbols: 80 },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('maxSymbols must be an integer from 1 to 50 (default 12)'),
+    }));
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('Do not retry with the same invalid value'),
+    }));
+    expect(calls).toEqual([]);
+  });
+
+  it('explains review source-mode errors before retrying', async () => {
+    const server = createCodeDeepServer({
+      projectPath: '/repo',
+      bridge: { async callText(): Promise<string> { throw new Error('must not call bridge'); } },
+      ensureIndex: async () => { throw new Error('must not initialize'); },
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: 'review',
+      arguments: { head: 'HEAD' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('head requires base'),
+    }));
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('omit head'),
+    }));
   });
 });
