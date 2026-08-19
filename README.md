@@ -86,19 +86,24 @@ code-deep explore \
   --path /path/to/project
 ```
 
-`explore` returns a focused set of relevant source, symbol relationships, call
-paths, and downstream impact. A useful query names the task, the symbols or
-files already known, and the relationship to trace, such as callers, callees,
-data flow, or blast radius.
+The CLI `explore` command returns the complete focused source, symbol
+relationships, call paths, and downstream impact produced by the backend. A
+useful query names the task, the symbols or files already known, and the
+relationship to trace, such as callers, callees, data flow, or blast radius.
 
 Agents should prefer the MCP tool. When shell fallback is necessary and a global
 `code-deep` command is not visible in the current process's `PATH`, run the same
 command through `npx -y @team-harness/code-deep@2.0.0`.
 
-Use `--max-files <count>` to control the amount of source returned. The MCP
-`explore` tool accepts the same query, project path, and file limit, so agents
-can refine an investigation with targeted follow-up questions while reusing the
-same persistent CodeGraph connection.
+Use `--max-files <count>` to control the CLI analysis and source breadth. The MCP
+`explore` tool accepts the same query, project path, and file limit, but projects
+the response independently. It defaults to `detailLevel: "minimal"`, capped at
+8,000 characters with structural context and the most relevant bounded source
+file. `detailLevel: "standard"` is capped at 20,000 characters and includes at
+most three bounded source files. Structured metadata reports original/returned
+characters, returned source files, and up to three omitted files as the next
+targeted queries. This keeps every response directly useful for reading code
+while avoiding repeated broad discovery over the same persistent connection.
 
 ## Review modes
 
@@ -125,16 +130,21 @@ unified `diff`. These modes are mutually exclusive, and `head` always requires
 `base`. With no diff or range it reviews the target project's current working tree.
 It defaults to `detailLevel: "minimal"`, returning the risk summary, signals,
 compact changed-line ranges, and the top three review items without embedding
-the diff or graph context. `reviewItemsOmitted` makes any response-only
-truncation explicit. Use `detailLevel: "standard"` when the complete
-bounded diff, impact compatibility view, and graph context are needed.
+the diff or graph context. `detailLevel: "standard"` returns the top ten review
+items. Both levels cap nested symbol, impact, and test lists and expose explicit
+omission counters. Use targeted `explore` calls to retrieve source and call-path
+context for the highest-risk symbols instead of loading the complete review into
+the agent context.
 
 Review input limits are explicit: `maxFiles` is an integer from `1` to `100`
 (default `20`) and bounds deep file, symbol, patch, and graph analysis;
 `maxSymbols` is an integer from `1` to `50` (default `12`) and bounds mapped
 symbols queried for impact. Values above these hard limits are rejected. Neither
 parameter truncates the complete-diff totals or global risk signals, so use them
-to control analysis breadth rather than to hide changed files or risk.
+to control analysis breadth rather than response size. Response projection limits
+are independent: for example, `maxSymbols: 50` can analyze 50 symbols while
+`detailLevel: "standard"` returns only the top ten and reports the other 40 in
+`reviewItemsOmitted`.
 
 Other review inputs are explicit as well: `projectPath` is the absolute Git root
 and defaults to the server project; choose one source mode (current working tree,
@@ -142,7 +152,7 @@ caller-supplied `diff`, or `base` with optional `head`). `diff` cannot be combin
 with `base`/`head`, and `head` requires `base` (defaulting to `HEAD`).
 `detailLevel` controls only the response projection: `minimal` is the default and
 returns priorities, risk, compact ranges, and the top three items; `standard`
-adds the bounded diff, complete items, impact view, and graph context.
+returns the top ten. Neither level embeds raw diff, impact text, or graph context.
 
 ## Process diagnostics
 

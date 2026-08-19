@@ -844,9 +844,15 @@ function riskLevel(score: number): RiskLevel {
 
 export function renderReviewMarkdown(
   report: ReviewReport,
-  options: { detailLevel?: 'minimal' | 'standard' } = {},
+  options: {
+    detailLevel?: 'minimal' | 'standard';
+    maxItems?: number;
+    includeExtendedSections?: boolean;
+  } = {},
 ): string {
   const detailLevel = options.detailLevel ?? 'standard';
+  const maxItems = options.maxItems ?? (detailLevel === 'minimal' ? 3 : report.reviewItems.length);
+  const includeExtendedSections = options.includeExtendedSections ?? detailLevel === 'standard';
   const analysisWarnings = collectAnalysisWarnings(
     report.files,
     report.reviewItems,
@@ -868,9 +874,7 @@ export function renderReviewMarkdown(
     '',
   ];
   if (report.reviewItems.length) {
-    const reviewItems = detailLevel === 'minimal'
-      ? report.reviewItems.slice(0, 3)
-      : report.reviewItems;
+    const reviewItems = report.reviewItems.slice(0, maxItems);
     for (const item of reviewItems) {
       const reasons = item.risk.reasons.length
         ? item.risk.reasons.map((reason) => reason.code).join(', ')
@@ -880,11 +884,12 @@ export function renderReviewMarkdown(
         `  Tests: ${item.tests.status}; mapping: ${item.mappingConfidence}; impact: ${item.impact.affectedCount}; reasons: ${reasons}`,
       );
     }
-    const reviewItemsOmitted = detailLevel === 'minimal'
-      ? Math.max(0, report.reviewItems.length - reviewItems.length)
-      : 0;
+    const reviewItemsOmitted = Math.max(0, report.reviewItems.length - reviewItems.length);
     if (reviewItemsOmitted) {
-      lines.push(`- ${reviewItemsOmitted} additional review items omitted; request detailLevel standard for the complete list.`);
+      const guidance = detailLevel === 'minimal'
+        ? 'request detailLevel standard for a broader prioritized list'
+        : 'use targeted explore calls for the affected symbols or files';
+      lines.push(`- ${reviewItemsOmitted} additional review items omitted; ${guidance}.`);
     }
   } else {
     const documentationFiles = report.files
@@ -908,7 +913,7 @@ export function renderReviewMarkdown(
       lines.push(`- +${signal.score} ${signal.message}`);
     }
   }
-  if (detailLevel === 'minimal') return lines.join('\n');
+  if (!includeExtendedSections) return lines.join('\n');
 
   if (report.files.length) {
     lines.push(

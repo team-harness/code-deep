@@ -1,6 +1,6 @@
 {
   "name": "@team-harness/code-intel",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Compatibility installer for @team-harness/code-deep",
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,6 @@
     "node": ">=20.0.0 <25.0.0"
   },
   "dependencies": {
-    "@team-harness/code-deep": "2.0.1"
+    "@team-harness/code-deep": "2.1.0"
   }
 }

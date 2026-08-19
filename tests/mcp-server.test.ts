@@ -46,6 +46,20 @@ describe('code-deep MCP server', () => {
       .toContain('absolute Git root');
     expect(tools.tools[0]?.inputSchema.properties?.query?.description)
       .toContain('Required focused exploration goal');
+    expect(tools.tools[0]?.inputSchema.properties?.detailLevel).toMatchObject({
+      type: 'string',
+      enum: ['minimal', 'standard'],
+      default: 'minimal',
+    });
+    expect(tools.tools[0]?.outputSchema).toMatchObject({
+      type: 'object',
+      required: expect.arrayContaining([
+        'schemaVersion', 'detailLevel', 'originalCharacters', 'returnedCharacters',
+        'charactersOmitted', 'sourceFilesFound', 'sourceFilesReturned',
+        'sourceFilesOmitted', 'returnedSourceFiles', 'omittedSourceFiles',
+        'omittedSourceFilesUnlisted', 'truncated',
+      ]),
+    });
     expect(tools.tools[1]?.description).toContain('descending risk order');
     expect(tools.tools[1]?.description).toContain('Choose exactly one source mode');
     expect(tools.tools[1]?.inputSchema.properties?.diff?.description)
@@ -58,6 +72,8 @@ describe('code-deep MCP server', () => {
       enum: ['minimal', 'standard'],
       default: 'minimal',
     });
+    expect(tools.tools[1]?.inputSchema.properties?.detailLevel?.description)
+      .toContain('standard returns the top ten');
     expect(tools.tools[1]?.inputSchema.properties?.maxFiles).toMatchObject({
       minimum: 1,
       maximum: 100,
@@ -85,12 +101,28 @@ describe('code-deep MCP server', () => {
       ]),
     });
     expect(tools.tools[1]?.outputSchema?.required).not.toContain('markdown');
+    expect(tools.tools[1]?.outputSchema?.properties).not.toHaveProperty('impacts');
+    expect(tools.tools[1]?.outputSchema?.properties).not.toHaveProperty('graphContext');
 
     const result = await client.callTool({
       name: 'explore',
       arguments: { query: 'AuthService login' },
     });
     expect(result.content).toContainEqual({ type: 'text', text: 'explored source' });
+    expect(result.structuredContent).toMatchObject({
+      schemaVersion: 1,
+      detailLevel: 'minimal',
+      originalCharacters: 'explored source'.length,
+      returnedCharacters: 'explored source'.length,
+      charactersOmitted: 0,
+      sourceFilesFound: 0,
+      sourceFilesReturned: 0,
+      sourceFilesOmitted: 0,
+      returnedSourceFiles: [],
+      omittedSourceFiles: [],
+      omittedSourceFilesUnlisted: 0,
+      truncated: false,
+    });
     expect(calls).toEqual([
       {
         name: 'codegraph_explore',
@@ -102,6 +134,84 @@ describe('code-deep MCP server', () => {
       },
     ]);
     expect(ensured).toEqual(['/repo']);
+  });
+
+  it('projects explore source progressively with explicit omission metadata', async () => {
+    const sourceBlock = (path: string, marker: string) => [
+      `**\`${path}\`** — focused`,
+      '',
+      '```typescript',
+      marker.repeat(7_000),
+      '```',
+    ].join('\n');
+    const raw = [
+      '**Flow**',
+      '',
+      'structural relationship '.repeat(400),
+      '',
+      '**Source Code**',
+      '',
+      sourceBlock('src/one.ts', 'a'),
+      sourceBlock('src/two.ts', 'b'),
+      sourceBlock('src/three.ts', 'c'),
+      sourceBlock('src/four.ts', 'd'),
+    ].join('\n');
+    const server = createCodeDeepServer({
+      projectPath: '/repo',
+      bridge: { async callText(): Promise<string> { return raw; } },
+      ensureIndex: async () => {},
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const minimal = await client.callTool({
+      name: 'explore',
+      arguments: { query: 'trace source flow', maxFiles: 12 },
+    });
+    const minimalText = (minimal.content[0] as { text: string }).text;
+    expect(minimalText.length).toBeLessThanOrEqual(8_000);
+    expect(minimalText).toContain('src/one.ts');
+    expect(minimalText).not.toContain('**`src/two.ts`**');
+    expect(minimal.structuredContent).toMatchObject({
+      detailLevel: 'minimal',
+      originalCharacters: raw.length,
+      sourceFilesFound: 4,
+      sourceFilesReturned: 1,
+      sourceFilesOmitted: 3,
+      returnedSourceFiles: ['src/one.ts'],
+      omittedSourceFiles: ['src/two.ts', 'src/three.ts', 'src/four.ts'],
+      omittedSourceFilesUnlisted: 0,
+      truncated: true,
+    });
+    expect((minimal.structuredContent as { charactersOmitted: number }).charactersOmitted)
+      .toBeGreaterThan(0);
+
+    const standard = await client.callTool({
+      name: 'explore',
+      arguments: { query: 'trace source flow', maxFiles: 12, detailLevel: 'standard' },
+    });
+    const standardText = (standard.content[0] as { text: string }).text;
+    expect(standardText.length).toBeLessThanOrEqual(20_000);
+    expect(standardText).toContain('src/one.ts');
+    expect(standardText).toContain('src/two.ts');
+    expect(standardText).toContain('src/three.ts');
+    expect(standardText).not.toContain('**`src/four.ts`**');
+    expect(standard.structuredContent).toMatchObject({
+      detailLevel: 'standard',
+      originalCharacters: raw.length,
+      sourceFilesFound: 4,
+      sourceFilesReturned: 3,
+      sourceFilesOmitted: 1,
+      returnedSourceFiles: ['src/one.ts', 'src/two.ts', 'src/three.ts'],
+      omittedSourceFiles: ['src/four.ts'],
+      omittedSourceFilesUnlisted: 0,
+      truncated: true,
+    });
+    expect((standard.structuredContent as { charactersOmitted: number }).charactersOmitted)
+      .toBeGreaterThan(0);
   });
 
   it('returns versioned review items through MCP structured content', async () => {
@@ -180,6 +290,10 @@ describe('code-deep MCP server', () => {
       type: 'text',
       text: expect.stringContaining('## Diff'),
     }));
+    expect(result.content).not.toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('## Changed symbols'),
+    }));
   });
 
   it('reports review items omitted by minimal detail', async () => {
@@ -229,7 +343,7 @@ describe('code-deep MCP server', () => {
     }));
   });
 
-  it('returns the complete report only when standard detail is requested', async () => {
+  it('returns a bounded standard projection without raw review payloads', async () => {
     const bridge = {
       async callText(name: string): Promise<string> {
         if (name === 'codegraph_node') return '- `login` (function) — :1';
@@ -265,11 +379,100 @@ describe('code-deep MCP server', () => {
     const structured = result.structuredContent as Record<string, unknown>;
 
     expect(structured.detailLevel).toBe('standard');
-    expect(structured).toHaveProperty('impacts');
-    expect(structured).toHaveProperty('graphContext', 'login context');
-    expect(result.content).toContainEqual(expect.objectContaining({
+    expect(structured).not.toHaveProperty('impacts');
+    expect(structured).not.toHaveProperty('graphContext');
+    expect(structured).toHaveProperty('reviewItemsOmitted', 0);
+    expect(result.content).not.toContainEqual(expect.objectContaining({
       type: 'text',
       text: expect.stringContaining('## Diff'),
+    }));
+    expect(result.content).not.toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('login context'),
+    }));
+  });
+
+  it('separates standard response size from the symbol analysis budget', async () => {
+    const bridge = {
+      async callText(name: string): Promise<string> {
+        if (name === 'codegraph_node') {
+          return Array.from({ length: 12 }, (_, index) =>
+            `- \`item${index + 1}\` (function) — :${index + 1}`).join('\n');
+        }
+        if (name === 'codegraph_impact') {
+          return [
+            '**Impact: "item" affects 5 symbols**',
+            '',
+            ...Array.from({ length: 5 }, (_, index) => [
+              `**tests/item${index + 1}.test.ts:**`,
+              `item test ${index + 1}:${index + 1}`,
+              '',
+            ]).flat(),
+          ].join('\n');
+        }
+        return 'large graph context that must stay out of the response';
+      },
+    };
+    const server = createCodeDeepServer({
+      projectPath: '/repo',
+      bridge,
+      ensureIndex: async () => {},
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    clients.push(client);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: 'review',
+      arguments: {
+        detailLevel: 'standard',
+        maxSymbols: 12,
+        diff: [
+          'diff --git a/src/items.ts b/src/items.ts',
+          '--- a/src/items.ts',
+          '+++ b/src/items.ts',
+          '@@ -0,0 +1,12 @@',
+          ...Array.from({ length: 12 }, (_, index) => `+item${index + 1}`),
+        ].join('\n'),
+      },
+    });
+    const structured = result.structuredContent as {
+      summary: { symbolsAnalyzed: number };
+      files: Array<{
+        symbols: unknown[];
+        symbolsOmitted: number;
+      }>;
+      reviewItems: Array<{
+        impact: {
+          affectedSymbols: unknown[];
+          affectedSymbolsOmitted: number;
+          testFiles: string[];
+          testFilesOmitted: number;
+        };
+        tests: {
+          relatedFiles: string[];
+          relatedFilesOmitted: number;
+        };
+      }>;
+      reviewItemsOmitted: number;
+    };
+
+    expect(structured.summary.symbolsAnalyzed).toBe(12);
+    expect(structured.files[0]?.symbols).toHaveLength(5);
+    expect(structured.files[0]?.symbolsOmitted).toBe(7);
+    expect(structured.reviewItems).toHaveLength(10);
+    expect(structured.reviewItemsOmitted).toBe(2);
+    expect(structured.reviewItems[0]?.impact.affectedSymbols).toHaveLength(3);
+    expect(structured.reviewItems[0]?.impact.affectedSymbolsOmitted).toBe(2);
+    expect(structured.reviewItems[0]?.impact.testFiles).toHaveLength(3);
+    expect(structured.reviewItems[0]?.impact.testFilesOmitted).toBe(2);
+    expect(structured.reviewItems[0]?.tests.relatedFiles).toHaveLength(3);
+    expect(structured.reviewItems[0]?.tests.relatedFilesOmitted).toBe(2);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('2 additional review items omitted'),
     }));
   });
 
