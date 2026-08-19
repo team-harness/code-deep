@@ -255,6 +255,10 @@ npm test
 npm run build
 ```
 
+## Community
+
+- [LINUX DO](https://linux.do/) - A community for developers to share, learn, and build together.
+
 ## Upstream
 
 This project is powered by [`@colbymchenry/codegraph`](https://github.com/colbymchenry/codegraph), licensed under MIT. `code-deep` is an independent Team Harness integration and is not an official CodeGraph package.
