@@ -1,6 +1,6 @@
 # code-deep 架构
 
-`@team-harness/code-deep` 是 CodeGraph 之上的持久化代码智能与审查桥。它负责三类调用入口、MCP/子进程生命周期、Git diff 审查编排、上游文本结果的标准化，以及安装和诊断工具；索引构建、符号检索和影响分析本身由固定版本的 `@colbymchenry/codegraph` 提供。
+`@team-harness/code-deep` 是 CodeGraph 之上的渐进式代码智能与审查工具。它默认通过短生命周期 CLI 工作，也提供显式 opt-in 的持久 MCP adapter；同时负责子进程生命周期、Git diff 审查编排、上游文本结果的标准化，以及安装和诊断工具。索引构建、符号检索和影响分析本身由固定版本的 `@colbymchenry/codegraph` 提供。
 
 本文描述当前实现，而不是未来设计。源码入口以 [`package.json`](package.json)、[`src/cli.ts`](src/cli.ts) 和 [`src/index.ts`](src/index.ts) 为准。
 
@@ -65,7 +65,7 @@ flowchart LR
 
 | 入口 | 当前公开能力 | 项目路径与生命周期 |
 | --- | --- | --- |
-| CLI [`src/cli.ts`](src/cli.ts) | `install`、`ps`/`processes`、`mcp`、`init`、`explore`、`review` | `explore` 和 `review` 每次创建一个 `CodeDeepClient`，并在 `finally` 中关闭；`mcp` 保持 bridge 常驻，收到 server close、`SIGINT` 或 `SIGTERM` 时关闭 |
+| CLI [`src/cli.ts`](src/cli.ts) | `install`、`ps`/`processes`、`mcp`、`init`、`explore`、`review`；默认渐进输出，`--detail full` 保留完整结果 | `explore` 和 `review` 每次创建一个 `CodeDeepClient`，并在 `finally` 中关闭；`mcp` 是显式 opt-in 的常驻 adapter，收到 server close、`SIGINT` 或 `SIGTERM` 时关闭 |
 | MCP [`src/mcp-server.ts`](src/mcp-server.ts) | 只公开 `explore` 和 `review`；两者标记为只读、幂等 | server 有默认 `projectPath`，每次工具调用可覆盖；工具异常转换为 MCP `isError` 结果 |
 | npm 库 [`src/index.ts`](src/index.ts) | `CodeDeepClient`、版本常量和 review 数据类型 | `projectPath` 在构造时固定；调用方负责执行 `close()` |
 
@@ -83,6 +83,7 @@ flowchart TD
   index --> version["version.ts"]
 
   cli --> client
+  cli --> cliOutput["cli-output.ts"]
   cli --> mcp["mcp-server.ts"]
   cli --> installer["installer.ts"]
   cli --> projectIndex["project-index.ts"]
@@ -93,6 +94,10 @@ flowchart TD
   client --> review
   client --> bridge
   mcp --> review
+  mcp --> exploreProjection["explore-projection.ts"]
+  mcp --> reviewProjection["review-projection.ts"]
+  cliOutput --> exploreProjection
+  cliOutput --> reviewProjection
   mcp -. "注入 GraphReader" .-> bridge
   review --> adapter["graph-adapter.ts"]
   adapter -. "GraphReader.callText" .-> bridge
@@ -112,7 +117,8 @@ flowchart TD
 | [`src/mcp-server.ts`](src/mcp-server.ts) | 外层 MCP 协议适配器；Zod 输入校验、工具元数据、review 输出 schema 和错误封装 |
 | [`src/review.ts`](src/review.ts) | 核心 review application service；获取和解析 diff、映射符号、查询影响、关联测试、计算风险并渲染报告 |
 | [`src/project-index.ts`](src/project-index.ts) | 显式索引生命周期；通过独立 `CodeGraphCommandRunner` 在当前 Git 仓库边界内执行一次性 CodeGraph `init` 或 `sync` 子进程 |
-| [`src/installer.ts`](src/installer.ts) | 向 Codex/Claude 用户配置安装 MCP 入口和 agent 指令；保留无关配置并进行备份和原子替换 |
+| [`src/installer.ts`](src/installer.ts) | 向 Codex/Claude 安装 agent 指令；默认 CLI-first 并移除受管 MCP 注册，`mode=mcp` 显式安装常驻入口；保留无关配置并进行备份和原子替换 |
+| [`src/cli-output.ts`](src/cli-output.ts) | CLI 输出 adapter；复用 Explore/Review 投影，`full` 模式回退核心原始结果 |
 | [`src/process-report.ts`](src/process-report.ts) | 只读进程诊断；合并 OS 进程表和 CodeGraph daemon registry，输出带版本的健康报告 |
 | [`src/version.ts`](src/version.ts) | 从本包 `package.json` 分别导出 wrapper 版本和 CodeGraph 依赖版本 |
 
@@ -172,13 +178,13 @@ flowchart TD
 - 变更行映射到同文件中最近的前置符号；`mappingConfidence` 表达这种启发式映射的可靠度。
 - `CodeGraphAdapter` 分别调用 `codegraph_node`、`codegraph_impact` 和 `codegraph_explore`。影响结果中的测试文件用于生成 `linked`、`changed`、`missing` 或 `unknown` 测试状态。
 - review item 按风险降序排列；整体分数取全局信号总分与最高 review item 分数的较大值，避免局部高风险被较低的聚合分数掩盖。逐符号风险只在 impact 解析为 `high` 且符号映射不为 `low` 时加入 `cross-boundary-impact`：边界保守识别为 workspace root 下的 package/app/service/module/lib，或 `src/` 下第一层领域。当前后端没有结构化关键流程证据，因此不从展示文本推断 `critical-flow`。
-- 同一个核心 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown；CLI 通过 `--json` 选择输出。MCP 投影使用独立的 `schemaVersion: 3`：`minimal` 返回前三个 review item，`standard` 返回前十个；两者都不嵌入 Diff、原始 impact 或 graph context。行范围、增删、风险、符号和续查目标使用紧凑字符串；空数组、零省略计数和默认高置信度字段不输出，只有发生响应层截断时才出现 `omitted.reviewItems`。
+- 同一个核心 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown；CLI 与 MCP 复用 `schemaVersion: 3` 渐进投影：`minimal` 返回前三个 review item，`standard` 返回前十个；两者都不嵌入 Diff、原始 impact 或 graph context。CLI 的 `--detail full` 返回核心 Markdown，配合 `--json` 返回完整 schema v1。行范围、增删、风险、符号和续查目标使用紧凑字符串；空数组、零省略计数和默认高置信度字段不输出，只有发生响应层截断时才出现 `omitted.reviewItems`。
 
 ### 安装与进程诊断
 
 这两个 CLI 用例不经过 `CodeDeepClient` 或 review 主链：
 
-- [`installCodeDeep`](src/installer.ts) 支持 Codex 和 Claude。它以结构化 TOML/JSON 校验目标配置，用标记块维护 agent 指令，保留无关内容；修改既有文件时创建 `.code-deep.bak`，通过同目录临时文件和 rename 完成原子替换。
+- [`installCodeDeep`](src/installer.ts) 支持 Codex 和 Claude，默认 `cli` mode 只安装 CLI-first 指令并删除明确受管的 code-intel/code-deep MCP 表、JSON entry 与权限；fresh install 不创建 Host 配置。`mcp` mode 显式注册常驻 adapter。两种模式都以结构化 TOML/JSON 校验待修改配置，用标记块维护 agent 指令，保留无关内容；修改既有文件时创建 `.code-deep.bak`，通过同目录临时文件和 rename 完成原子替换。配置迁移不终止已有 Host 进程，需由 Host 关闭生命周期。
 - [`collectProcessReport`](src/process-report.ts) 并行读取 OS 进程表、`~/.codegraph/daemons/*.json`，并在 POSIX 上用 `fs.access` 收集 socket 路径存在性；它分类 launcher、code-deep MCP、CodeGraph session/proxy/daemon/watchdog 及失效 registry 记录。路径存在不证明 socket 可连接或 daemon 存活；Windows 则从活动 daemon registry 进程推断 named-pipe 状态。输出只提供证据和 `cleanupCandidate`，不会杀进程或删除文件。
 
 ## 数据契约
@@ -297,6 +303,7 @@ type CodeGraphCommandRunner = (
 | [`tests/fixtures/fake-codegraph-server.mjs`](tests/fixtures/fake-codegraph-server.mjs) | 真实 stdio MCP 假后端；回显 PID/调用并支持一次崩溃，用于验证进程复用和重连 |
 | [`tests/bridge.test.ts`](tests/bridge.test.ts) | 单子进程复用、连接中断后单次重连、连接建立期间关闭 |
 | [`tests/client.test.ts`](tests/client.test.ts) | Explore/review 共享 bridge，根公共 API 不泄漏内部类 |
+| [`tests/cli-output.test.ts`](tests/cli-output.test.ts) | CLI minimal/standard/full 投影与完整报告兼容入口 |
 | [`tests/mcp-server.test.ts`](tests/mcp-server.test.ts) | 外层只暴露两工具、review 结构化输出、互斥输入在图调用前失败 |
 | [`tests/review.test.ts`](tests/review.test.ts) | 工作树/range/untracked diff、符号映射、影响、风险、截断、退化、测试状态和项目扩展 |
 | [`tests/graph-adapter.test.ts`](tests/graph-adapter.test.ts) | 已知文本格式标准化，以及未知格式必须产生 warning |
@@ -305,9 +312,9 @@ type CodeGraphCommandRunner = (
 | [`tests/process-report.test.ts`](tests/process-report.test.ts) | 跨角色进程分类、孤儿证据和只读 stale metadata |
 | [`tests/version.test.ts`](tests/version.test.ts) | wrapper 与 CodeGraph 版本独立跟踪 |
 
-当前文档生成基线执行 `npm test`（9 个测试文件；测试数量以当前 Vitest 输出为准）和 `npm run typecheck`。仍有两个重要覆盖缺口：
+当前文档生成基线执行 `npm test`（10 个测试文件；测试数量以当前 Vitest 输出为准）和 `npm run typecheck`。仍有两个重要覆盖缺口：
 
-1. [`src/cli.ts`](src/cli.ts) 没有直接测试，command wiring、文本/JSON 输出以及 `SIGINT`/`SIGTERM` 关闭只由源码核验。
+1. [`src/cli.ts`](src/cli.ts) 的 command wiring 与 `SIGINT`/`SIGTERM` 关闭没有直接测试；文本/JSON 选择后的输出行为由 `cli-output.test.ts` 覆盖。
 2. 测试使用 fake server 或内联 stub，没有针对真实 `@colbymchenry/codegraph` 的端到端契约测试；扩展名镜像和文本解析器因此仍与固定后端版本存在约定耦合。
 
 ## 变更检查点

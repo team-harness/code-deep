@@ -1,7 +1,7 @@
 {
   "name": "@team-harness/code-deep",
-  "version": "3.0.0",
-  "description": "Persistent MCP code intelligence and review bridge powered by CodeGraph",
+  "version": "3.0.1",
+  "description": "Progressive CLI and optional MCP code intelligence powered by CodeGraph",
   "type": "module",
   "license": "MIT",
   "repository": {

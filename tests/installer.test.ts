@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   installCodeDeep,
+  parseInstallMode,
   parseInstallTargets,
 } from '../src/installer.js';
 import { CODE_DEEP_VERSION } from '../src/version.js';
@@ -28,6 +29,86 @@ describe('code-deep installer', () => {
     expect(() => parseInstallTargets('cursor')).toThrow('Unsupported install target: cursor');
   });
 
+  it('parses CLI and MCP install modes', () => {
+    expect(parseInstallMode('cli')).toBe('cli');
+    expect(parseInstallMode('mcp')).toBe('mcp');
+    expect(() => parseInstallMode('daemon')).toThrow('Unsupported install mode: daemon');
+  });
+
+  it('defaults Codex installation to CLI guidance and removes managed MCP tables', async () => {
+    const homeDir = await makeHome();
+    const codexDir = join(homeDir, '.codex');
+    await mkdir(codexDir, { recursive: true });
+    const configPath = join(codexDir, 'config.toml');
+    const instructionsPath = join(codexDir, 'AGENTS.md');
+    await writeFile(configPath, [
+      'model = "gpt-5"',
+      '',
+      '[mcp_servers.code-deep]',
+      'command = "code-deep"',
+      'args = ["mcp"]',
+      '',
+      '[mcp_servers.existing]',
+      'command = "existing"',
+      '',
+    ].join('\n'));
+
+    const result = await installCodeDeep({ homeDir, targets: ['codex'] });
+    const config = await readFile(configPath, 'utf8');
+    const instructions = await readFile(instructionsPath, 'utf8');
+
+    expect(config).not.toContain('mcp_servers.code-deep');
+    expect(config).toContain('[mcp_servers.existing]\ncommand = "existing"');
+    expect(instructions).toContain('code-deep explore');
+    expect(instructions).toContain('--detail minimal');
+    expect(instructions).not.toContain('Prefer the code-deep MCP tools');
+    expect(result.files.map(({ action }) => action)).toEqual(['updated', 'created']);
+  });
+
+  it('defaults Claude installation to CLI guidance and removes managed MCP permissions', async () => {
+    const homeDir = await makeHome();
+    const claudeDir = join(homeDir, '.claude');
+    await mkdir(claudeDir, { recursive: true });
+    const mcpPath = join(homeDir, '.claude.json');
+    const settingsPath = join(claudeDir, 'settings.json');
+    await writeFile(mcpPath, JSON.stringify({
+      mcpServers: {
+        existing: { command: 'keep' },
+        'code-deep': { type: 'stdio', command: 'code-deep', args: ['mcp'] },
+      },
+    }, null, 2));
+    await writeFile(settingsPath, JSON.stringify({
+      permissions: { allow: ['mcp__code-deep__*', 'Bash(git status:*)'] },
+    }, null, 2));
+
+    const result = await installCodeDeep({ homeDir, targets: ['claude'] });
+    const mcp = JSON.parse(await readFile(mcpPath, 'utf8')) as Record<string, any>;
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, any>;
+    const instructions = await readFile(join(claudeDir, 'CLAUDE.md'), 'utf8');
+
+    expect(mcp.mcpServers).toEqual({ existing: { command: 'keep' } });
+    expect(settings.permissions.allow).toEqual(['Bash(git status:*)']);
+    expect(instructions).toContain('code-deep review');
+    expect(result.files.map(({ action }) => action)).toEqual(['updated', 'updated', 'created']);
+  });
+
+  it('keeps a fresh CLI-first install limited to instruction files and remains idempotent', async () => {
+    const homeDir = await makeHome();
+
+    const first = await installCodeDeep({ homeDir, targets: ['codex', 'claude'] });
+
+    expect(first.files.map(({ path, action }) => [path.slice(homeDir.length), action])).toEqual([
+      ['/.codex/AGENTS.md', 'created'],
+      ['/.claude/CLAUDE.md', 'created'],
+    ]);
+    await expect(readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(join(homeDir, '.claude.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(join(homeDir, '.claude', 'settings.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const second = await installCodeDeep({ homeDir, targets: ['codex', 'claude'] });
+    expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged']);
+  });
+
   it('installs Codex MCP and exploration/review instructions without disturbing existing config', async () => {
     const homeDir = await makeHome();
     const codexDir = join(homeDir, '.codex');
@@ -38,7 +119,7 @@ describe('code-deep installer', () => {
     await writeFile(configPath, originalConfig);
     await writeFile(instructionsPath, '# Personal rules\n\n<!-- CODEGRAPH_START -->\nold rules\n<!-- CODEGRAPH_END -->\n');
 
-    const first = await installCodeDeep({ homeDir, targets: ['codex'] });
+    const first = await installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' });
     const installedConfig = await readFile(configPath, 'utf8');
     const installedInstructions = await readFile(instructionsPath, 'utf8');
 
@@ -63,7 +144,7 @@ describe('code-deep installer', () => {
     expect(await readFile(`${configPath}.code-deep.bak`, 'utf8')).toBe(originalConfig);
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated']);
 
-    const second = await installCodeDeep({ homeDir, targets: ['codex'] });
+    const second = await installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' });
     expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged']);
     expect(await readFile(configPath, 'utf8')).toBe(installedConfig);
     expect(await readFile(instructionsPath, 'utf8')).toBe(installedInstructions);
@@ -86,7 +167,7 @@ describe('code-deep installer', () => {
       '',
     ].join('\n'));
 
-    await installCodeDeep({ homeDir, targets: ['codex'] });
+    await installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' });
 
     const installed = await readFile(configPath, 'utf8');
     expect(installed.match(/\[mcp_servers\.(?:code-deep|"code-deep")\]/g)).toHaveLength(1);
@@ -121,7 +202,7 @@ describe('code-deep installer', () => {
       '',
     ].join('\n'));
 
-    await installCodeDeep({ homeDir, targets: ['codex'] });
+    await installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' });
 
     const config = await readFile(configPath, 'utf8');
     const instructions = await readFile(instructionsPath, 'utf8');
@@ -147,7 +228,7 @@ describe('code-deep installer', () => {
     ].join('\n');
     await writeFile(configPath, duplicated);
 
-    await expect(installCodeDeep({ homeDir, targets: ['codex'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' }))
       .rejects.toThrow('declared more than once');
     expect(await readFile(configPath, 'utf8')).toBe(duplicated);
   });
@@ -164,7 +245,7 @@ describe('code-deep installer', () => {
     const configPath = join(codexDir, 'config.toml');
     await writeFile(configPath, existing);
 
-    await expect(installCodeDeep({ homeDir, targets: ['codex'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['codex'], mode: 'mcp' }))
       .rejects.toThrow('inline or dotted representation');
     expect(await readFile(configPath, 'utf8')).toBe(existing);
   });
@@ -180,7 +261,7 @@ describe('code-deep installer', () => {
     await writeFile(settingsPath, JSON.stringify({ permissions: { allow: ['Bash(git status:*)'] } }, null, 2));
     await writeFile(instructionsPath, '# Existing Claude rules\n');
 
-    const first = await installCodeDeep({ homeDir, targets: ['claude'] });
+    const first = await installCodeDeep({ homeDir, targets: ['claude'], mode: 'mcp' });
     const mcp = JSON.parse(await readFile(mcpPath, 'utf8')) as Record<string, any>;
     const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, any>;
     const instructions = await readFile(instructionsPath, 'utf8');
@@ -196,7 +277,7 @@ describe('code-deep installer', () => {
     expect(instructions).toContain('<!-- CODE_DEEP_START -->');
     expect(first.files.map(({ action }) => action)).toEqual(['updated', 'updated', 'updated']);
 
-    const second = await installCodeDeep({ homeDir, targets: ['claude'] });
+    const second = await installCodeDeep({ homeDir, targets: ['claude'], mode: 'mcp' });
     expect(second.files.map(({ action }) => action)).toEqual(['unchanged', 'unchanged', 'unchanged']);
   });
 
@@ -216,7 +297,7 @@ describe('code-deep installer', () => {
       permissions: { allow: ['mcp__code-intel__*', 'Bash(git status:*)'] },
     }, null, 2));
 
-    await installCodeDeep({ homeDir, targets: ['claude'] });
+    await installCodeDeep({ homeDir, targets: ['claude'], mode: 'mcp' });
 
     const mcp = JSON.parse(await readFile(mcpPath, 'utf8')) as Record<string, any>;
     const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, any>;
@@ -235,7 +316,7 @@ describe('code-deep installer', () => {
     const malformed = '{ not-json';
     await writeFile(join(homeDir, '.claude.json'), malformed);
 
-    await expect(installCodeDeep({ homeDir, targets: ['claude'] }))
+    await expect(installCodeDeep({ homeDir, targets: ['claude'], mode: 'mcp' }))
       .rejects.toThrow('Cannot parse');
     expect(await readFile(join(homeDir, '.claude.json'), 'utf8')).toBe(malformed);
   });

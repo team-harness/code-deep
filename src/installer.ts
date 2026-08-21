@@ -12,6 +12,7 @@ import { parse as parseToml } from 'smol-toml';
 import { CODE_DEEP_VERSION } from './version.js';
 
 export type InstallTarget = 'codex' | 'claude';
+export type InstallMode = 'cli' | 'mcp';
 export type InstallAction = 'created' | 'updated' | 'unchanged';
 
 export interface InstallFileResult {
@@ -27,6 +28,7 @@ export interface InstallResult {
 export interface InstallCodeDeepOptions {
   homeDir: string;
   targets: InstallTarget[];
+  mode?: InstallMode;
 }
 
 const PACKAGE_SPEC = `@team-harness/code-deep@${CODE_DEEP_VERSION}`;
@@ -40,7 +42,7 @@ const INSTRUCTIONS_START = '<!-- CODE_DEEP_START -->';
 const INSTRUCTIONS_END = '<!-- CODE_DEEP_END -->';
 const LEGACY_INSTRUCTIONS_START = '<!-- CODE_INTEL_START -->';
 const LEGACY_INSTRUCTIONS_END = '<!-- CODE_INTEL_END -->';
-const INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
+const MCP_INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
 ## code-deep
 
 Use code-deep for code exploration and review assistance in Git repositories. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree:
@@ -58,6 +60,20 @@ Shell fallback, only when the code-deep MCP tools are unavailable: use \`code-de
 Do not ask the user to initialize new worktrees. Use \`code-deep init\` only for an explicit manual refresh or to diagnose an initialization failure.
 ${INSTRUCTIONS_END}`;
 
+const CLI_INSTRUCTIONS_BLOCK = `${INSTRUCTIONS_START}
+## code-deep
+
+Use the \`code-deep\` CLI for focused code exploration and review assistance in Git repositories. Each command exits after completing its work, so it does not leave a per-agent MCP process running. The first \`explore\` or \`review\` call automatically initializes a missing index for the current repository or worktree.
+
+1. Before broad reading or editing, run \`code-deep explore "<task goal + symbols/files + callers, callees, data flow, or blast radius>" --path /absolute/git/root --detail minimal\`.
+2. After changes, run \`code-deep review /absolute/git/root --detail minimal --json\`. Add both \`--base <ref>\` and \`--head <ref>\` for a branch range.
+3. Process \`reviewItems\` in descending risk order. Test status is \`linked\`, \`changed\`, \`missing\`, or \`unknown\`; risk prioritizes attention and does not prove a bug.
+4. When output reports omissions, low confidence, or warnings, rerun a targeted \`explore\` for the affected symbol or path. Use \`--detail standard\` for broader bounded context and \`--detail full\` only when the complete raw result is required.
+5. Before emitting a review comment, verify a concrete failure path against the diff and focused source context.
+
+If \`code-deep\` is not in \`PATH\`, run the same commands through \`npx -y ${PACKAGE_SPEC}\`. Do not ask the user to initialize new worktrees. Use \`code-deep init\` only for an explicit manual refresh or to diagnose an initialization failure. CodeGraph is an internal backend; refer to the capability as code-deep.
+${INSTRUCTIONS_END}`;
+
 export function parseInstallTargets(value: string): InstallTarget[] {
   const targets: InstallTarget[] = [];
   for (const raw of value.split(',')) {
@@ -72,22 +88,29 @@ export function parseInstallTargets(value: string): InstallTarget[] {
   return targets;
 }
 
+export function parseInstallMode(value: string): InstallMode {
+  const mode = value.trim().toLowerCase();
+  if (mode === 'cli' || mode === 'mcp') return mode;
+  throw new Error(`Unsupported install mode: ${value}`);
+}
+
 export async function installCodeDeep(
   options: InstallCodeDeepOptions,
 ): Promise<InstallResult> {
   if (!options.targets.length) throw new Error('At least one install target is required');
+  const mode = parseInstallMode(options.mode ?? 'cli');
   const files: InstallFileResult[] = [];
   for (const target of options.targets) {
     if (target === 'codex') {
-      files.push(...await installCodex(options.homeDir));
+      files.push(...await installCodex(options.homeDir, mode));
     } else {
-      files.push(...await installClaude(options.homeDir));
+      files.push(...await installClaude(options.homeDir, mode));
     }
   }
   return { files };
 }
 
-async function installCodex(homeDir: string): Promise<InstallFileResult[]> {
+async function installCodex(homeDir: string, mode: InstallMode): Promise<InstallFileResult[]> {
   const directory = join(homeDir, '.codex');
   const configPath = join(directory, 'config.toml');
   const instructionsPath = join(directory, 'AGENTS.md');
@@ -98,45 +121,83 @@ async function installCodex(homeDir: string): Promise<InstallFileResult[]> {
     'args = ["mcp"]',
   ].join('\n');
 
-  return [
-    await writeIfChanged(configPath, upsertTomlTable(currentConfig ?? '', block)),
-    await writeIfChanged(
-      instructionsPath,
-      upsertInstructions(await readOptionalFile(instructionsPath)),
+  const files: InstallFileResult[] = [];
+  const nextConfig = upsertTomlTable(currentConfig ?? '', mode === 'mcp' ? block : null);
+  if (mode === 'mcp' || (currentConfig !== null && nextConfig !== currentConfig)) {
+    files.push(await writeIfChanged(configPath, nextConfig));
+  }
+  files.push(await writeIfChanged(
+    instructionsPath,
+    upsertInstructions(
+      await readOptionalFile(instructionsPath),
+      mode === 'mcp' ? MCP_INSTRUCTIONS_BLOCK : CLI_INSTRUCTIONS_BLOCK,
     ),
-  ];
+  ));
+  return files;
 }
 
-async function installClaude(homeDir: string): Promise<InstallFileResult[]> {
+async function installClaude(homeDir: string, mode: InstallMode): Promise<InstallFileResult[]> {
   const directory = join(homeDir, '.claude');
   const mcpPath = join(homeDir, '.claude.json');
   const settingsPath = join(directory, 'settings.json');
   const instructionsPath = join(directory, 'CLAUDE.md');
 
-  const mcp = await readJsonObject(mcpPath);
-  const mcpServers = objectProperty(mcp, 'mcpServers', mcpPath);
-  delete mcpServers['code-intel'];
-  mcpServers['code-deep'] = MCP_ENTRY;
+  const mcpContent = await readOptionalFile(mcpPath);
+  const mcp = parseJsonObject(mcpContent, mcpPath);
+  const settingsContent = await readOptionalFile(settingsPath);
+  const settings = parseJsonObject(settingsContent, settingsPath);
+  let mcpChanged = false;
+  let settingsChanged = false;
 
-  const settings = await readJsonObject(settingsPath);
-  const permissions = objectProperty(settings, 'permissions', settingsPath);
-  const allow = arrayProperty(permissions, 'allow', settingsPath);
-  permissions.allow = [
-    ...allow.filter((entry) => entry !== 'mcp__code-intel__*' && entry !== 'mcp__code-deep__*'),
-    'mcp__code-deep__*',
-  ];
+  if (mode === 'mcp') {
+    const mcpServers = objectProperty(mcp, 'mcpServers', mcpPath);
+    mcpChanged = delete mcpServers['code-intel'] || mcpChanged;
+    mcpChanged = !sameJsonValue(mcpServers['code-deep'], MCP_ENTRY) || mcpChanged;
+    mcpServers['code-deep'] = MCP_ENTRY;
 
-  return [
-    await writeIfChanged(mcpPath, `${JSON.stringify(mcp, null, 2)}\n`),
-    await writeIfChanged(settingsPath, `${JSON.stringify(settings, null, 2)}\n`),
-    await writeIfChanged(
-      instructionsPath,
-      upsertInstructions(await readOptionalFile(instructionsPath)),
+    const permissions = objectProperty(settings, 'permissions', settingsPath);
+    const allow = arrayProperty(permissions, 'allow', settingsPath);
+    const nextAllow = [
+      ...allow.filter((entry) => entry !== 'mcp__code-intel__*' && entry !== 'mcp__code-deep__*'),
+      'mcp__code-deep__*',
+    ];
+    settingsChanged = !sameJsonValue(allow, nextAllow);
+    permissions.allow = nextAllow;
+  } else {
+    const mcpServers = optionalObjectProperty(mcp, 'mcpServers', mcpPath);
+    if (mcpServers) {
+      mcpChanged = delete mcpServers['code-intel'] || mcpChanged;
+      mcpChanged = delete mcpServers['code-deep'] || mcpChanged;
+    }
+    const permissions = optionalObjectProperty(settings, 'permissions', settingsPath);
+    if (permissions) {
+      const allow = optionalArrayProperty(permissions, 'allow', settingsPath);
+      if (allow) {
+        const nextAllow = allow.filter((entry) => entry !== 'mcp__code-intel__*' && entry !== 'mcp__code-deep__*');
+        settingsChanged = !sameJsonValue(allow, nextAllow);
+        permissions.allow = nextAllow;
+      }
+    }
+  }
+
+  const files: InstallFileResult[] = [];
+  if (mode === 'mcp' || (mcpContent !== null && mcpChanged)) {
+    files.push(await writeIfChanged(mcpPath, `${JSON.stringify(mcp, null, 2)}\n`));
+  }
+  if (mode === 'mcp' || (settingsContent !== null && settingsChanged)) {
+    files.push(await writeIfChanged(settingsPath, `${JSON.stringify(settings, null, 2)}\n`));
+  }
+  files.push(await writeIfChanged(
+    instructionsPath,
+    upsertInstructions(
+      await readOptionalFile(instructionsPath),
+      mode === 'mcp' ? MCP_INSTRUCTIONS_BLOCK : CLI_INSTRUCTIONS_BLOCK,
     ),
-  ];
+  ));
+  return files;
 }
 
-function upsertTomlTable(content: string, block: string): string {
+function upsertTomlTable(content: string, block: string | null): string {
   const lines = content.split(/(?<=\n)/);
   const managedHeaders = lines
     .map((line, index) => ({ index, key: managedTomlKey(line) }))
@@ -160,6 +221,7 @@ function upsertTomlTable(content: string, block: string): string {
     }
   }
   if (!managedHeaders.length) {
+    if (block === null) return content;
     const trimmed = content.trimEnd();
     return `${trimmed}${trimmed ? '\n\n' : ''}${block}\n`;
   }
@@ -171,7 +233,7 @@ function upsertTomlTable(content: string, block: string): string {
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
     if (managedIndexes.has(index)) {
-      if (index === firstManagedIndex) output.push(`${block}\n`);
+      if (index === firstManagedIndex && block !== null) output.push(`${block}\n`);
       skippingManagedTable = true;
       continue;
     }
@@ -206,8 +268,8 @@ function parseTomlConfig(content: string): Record<string, unknown> {
   }
 }
 
-function upsertInstructions(content: string | null): string {
-  if (content === null) return `${INSTRUCTIONS_BLOCK}\n`;
+function upsertInstructions(content: string | null, instructionsBlock: string): string {
+  if (content === null) return `${instructionsBlock}\n`;
   const markerPairs = [
     [INSTRUCTIONS_START, INSTRUCTIONS_END],
     [LEGACY_INSTRUCTIONS_START, LEGACY_INSTRUCTIONS_END],
@@ -222,21 +284,20 @@ function upsertInstructions(content: string | null): string {
   }).sort((left, right) => left.start - right.start);
   if (!blocks.length) {
     const trimmed = content.trimEnd();
-    return `${trimmed}${trimmed ? '\n\n' : ''}${INSTRUCTIONS_BLOCK}\n`;
+    return `${trimmed}${trimmed ? '\n\n' : ''}${instructionsBlock}\n`;
   }
   let output = '';
   let cursor = 0;
   for (const [index, current] of blocks.entries()) {
     output += content.slice(cursor, current.start);
-    if (index === 0) output += INSTRUCTIONS_BLOCK;
+    if (index === 0) output += instructionsBlock;
     cursor = current.end;
   }
   output += content.slice(cursor);
   return output;
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown>> {
-  const content = await readOptionalFile(path);
+function parseJsonObject(content: string | null, path: string): Record<string, unknown> {
   if (content === null) return {};
   try {
     const parsed = JSON.parse(content) as unknown;
@@ -246,6 +307,32 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Cannot parse ${path}: ${message}`);
   }
+}
+
+function optionalObjectProperty(
+  parent: Record<string, unknown>,
+  key: string,
+  path: string,
+): Record<string, unknown> | null {
+  const value = parent[key];
+  if (value === undefined) return null;
+  if (!isRecord(value)) throw new Error(`Cannot update ${path}: ${key} is not an object`);
+  return value;
+}
+
+function optionalArrayProperty(
+  parent: Record<string, unknown>,
+  key: string,
+  path: string,
+): unknown[] | null {
+  const value = parent[key];
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) throw new Error(`Cannot update ${path}: ${key} is not an array`);
+  return value;
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function objectProperty(

@@ -1,18 +1,18 @@
 # code-deep
 
 > **Upgrading from code-intel:** install `@team-harness/code-deep`, then run
-> `code-deep install --target codex,claude`. The installer replaces the old MCP
-> server configuration and permissions. Restart the host after installation so
-> its active MCP process uses code-deep.
+> `code-deep install --target codex,claude`. The default CLI-first installation
+> removes managed code-intel/code-deep MCP registrations and permissions. Restart
+> active hosts so they stop their already-running MCP processes.
 >
 > The legacy command `npm install -g @team-harness/code-intel` remains supported:
 > it installs the matching `@team-harness/code-deep` release and exposes only
 > the `code-deep` executable.
 
 `code-deep` gives coding agents two focused workflows: understand code before
-changing it, then review the resulting diff. It keeps one CodeGraph MCP
-connection alive for the lifetime of the outer MCP server and exposes a
-deliberately small interface:
+changing it, then review the resulting diff. The default CLI starts a bounded
+backend session for each command and closes it before exiting. An optional MCP
+mode keeps one connection alive for latency-sensitive agent sessions.
 
 - `explore`: find relevant source, trace callers and callees, follow data flow,
   and understand blast radius without reading the repository broadly.
@@ -32,15 +32,23 @@ npm install -g @team-harness/code-deep
 code-deep install --target codex,claude
 ```
 
-`install` registers the `code-deep` MCP server globally for the selected agents.
-It also adds a marker-delimited guidance block to Codex `~/.codex/AGENTS.md`
-and Claude `~/.claude/CLAUDE.md`, directing both agents to use `explore` for
-code discovery and `review` before finalizing changes. Claude receives the
-`mcp__code-deep__*` permission in `~/.claude/settings.json`.
+The default `cli` mode adds a marker-delimited guidance block to Codex
+`~/.codex/AGENTS.md` and Claude `~/.claude/CLAUDE.md`. It removes only the
+managed code-intel/code-deep MCP registrations and Claude permissions, leaving
+unrelated configuration untouched. A fresh CLI-first install creates only the
+two instruction files, so each agent runs short-lived `code-deep explore` and
+`code-deep review` commands instead of owning a persistent MCP process.
 
-The generated MCP configuration invokes the global `code-deep` command. Run
-`code-deep install` again after upgrading from code-intel so existing agent
-configuration, permissions, and instructions migrate to the new identity.
+Opt into the persistent MCP adapter when lower repeated-query latency matters:
+
+```bash
+code-deep install --target codex,claude --mode mcp
+```
+
+This registers the global `code-deep mcp` command and grants Claude the
+`mcp__code-deep__*` permission. Running the default install again switches back
+to CLI mode. Configuration changes do not terminate already-running hosts;
+restart or close those hosts after changing mode.
 
 The installer preserves unrelated configuration, backs up each changed existing
 file as `<file>.code-deep.bak`, and is idempotent. It does not initialize a
@@ -51,7 +59,7 @@ initialization. Existing indexes are left to CodeGraph's connect-time catch-up
 and file watcher; use `code-deep init` only for an explicit refresh or to
 diagnose initialization failure.
 
-## MCP configuration
+## Optional MCP configuration
 
 ```json
 {
@@ -71,10 +79,10 @@ strict read-only behavior. Internally, the review module also uses CodeGraph's
 
 ## Agent behavior
 
-When the code-deep MCP tools are available, agents must call them directly and
-must not probe the shell CLI first. Shell commands are fallback-only. User-facing
-messages refer to the capability, server, and tools as `code-deep`; CodeGraph is
-the internal backend name, not a separate tool to switch to.
+CLI-first instructions tell agents to call the global `code-deep` executable and
+use bounded progressive output. Installing with `--mode mcp` replaces that block
+with MCP-first instructions. Both modes refer to the capability as `code-deep`;
+CodeGraph is the internal backend name, not a separate tool to switch to.
 
 ## Explore code
 
@@ -83,34 +91,35 @@ Ask a task-oriented question before reading or editing broadly:
 ```bash
 code-deep explore \
   "Trace how AuthService login creates and validates sessions, including callers and blast radius" \
-  --path /path/to/project
+  --path /path/to/project \
+  --detail minimal
 ```
 
-The CLI `explore` command returns the complete focused source, symbol
-relationships, call paths, and downstream impact produced by the backend. A
-useful query names the task, the symbols or files already known, and the
-relationship to trace, such as callers, callees, data flow, or blast radius.
+The CLI defaults to the same progressive projection as MCP: `minimal` returns
+structural context and the most relevant bounded source file; `standard` returns
+at most three bounded source files. Use `--detail full` only when the complete
+backend result is required. A useful query names the task, known symbols/files,
+and the relationship to trace: callers, callees, data flow, or blast radius.
 
-Agents should prefer the MCP tool. When shell fallback is necessary and a global
-`code-deep` command is not visible in the current process's `PATH`, run the same
-command through `npx -y @team-harness/code-deep@2.0.0`.
+When the global `code-deep` command is not visible in the current process's
+`PATH`, run the same command through `npx -y @team-harness/code-deep`.
 
-Use `--max-files <count>` to control the CLI analysis and source breadth. The MCP
-`explore` tool accepts the same query, project path, and file limit, but projects
-the response independently. It defaults to `detailLevel: "minimal"`, capped at
+Use `--max-files <count>` to control analysis and source breadth. CLI `--detail`
+and MCP `detailLevel` select the same projection. Minimal is capped at
 8,000 characters with structural context and the most relevant bounded source
-file. `detailLevel: "standard"` is capped at 20,000 characters and includes at
+file. Standard is capped at 20,000 characters and includes at
 most three bounded source files. Structured metadata reports original/returned
 characters, returned source files, and up to three omitted files as the next
 targeted queries. This keeps every response directly useful for reading code
-while avoiding repeated broad discovery over the same persistent connection.
+while avoiding repeated broad discovery; MCP mode additionally reuses one
+persistent connection within its Host session.
 
 ## Review modes
 
 Review the current working tree, including staged, unstaged, and untracked files:
 
 ```bash
-code-deep review /path/to/project
+code-deep review /path/to/project --detail minimal
 ```
 
 Review a branch or pull-request range:
@@ -122,8 +131,12 @@ code-deep review /path/to/project --base origin/main --head HEAD
 Get the structured report:
 
 ```bash
-code-deep review /path/to/project --json
+code-deep review /path/to/project --detail minimal --json
 ```
+
+Minimal JSON uses the compact schema v3 projection; standard returns the top ten
+priorities. Use `--detail full` for the previous complete Markdown report, or
+`--detail full --json` for the complete core schema v1 report.
 
 The MCP `review` tool accepts the same `base` and `head`, or a caller-supplied
 unified `diff`. These modes are mutually exclusive, and `head` always requires
@@ -131,13 +144,14 @@ unified `diff`. These modes are mutually exclusive, and `head` always requires
 It defaults to `detailLevel: "minimal"`, returning the risk summary, signals,
 compact changed-line ranges, and the top three review items without embedding
 the diff or graph context. `detailLevel: "standard"` returns the top ten review
-items. The MCP-only schema uses compact agent-readable strings: line ranges such
+items. The progressive schema uses compact agent-readable strings: line ranges such
 as `42,45,51-57`, deltas such as `+9/-5`, and risks such as `wide-impact:+12`.
 Empty arrays, zero omission counters, and default high-confidence fields are not
 emitted. Both levels cap follow-up targets and linked test files and expose
 omission counts only when needed. Use targeted `explore` calls to retrieve source
 and call-path context for the highest-risk symbols instead of loading the complete
-review into the agent context. CLI JSON remains the full library report.
+review into the agent context. CLI and MCP share the projection implementation;
+the npm library continues returning the complete report.
 
 Review input limits are explicit: `maxFiles` is an integer from `1` to `100`
 (default `20`) and bounds deep file, symbol, patch, and graph analysis;
@@ -176,27 +190,17 @@ remove stale metadata.
 ## Architecture
 
 ```text
-Agent / MCP host
-      |
-      | stdio MCP: explore, review
-      v
-code-deep (long-lived process)
-      |
-      +-- CodeGraphBridge ---- persistent MCP client ---- CodeGraph MCP
-      |       +-- explore ---- focused source / call paths / blast radius
-      |
-      +-- ReviewAnalyzer
-            +-- structured unified-diff parser
-            +-- hunk -> current symbol mapping
-            +-- node / impact / explore queries
-            +-- deterministic risk scorer
-            +-- Markdown + structured JSON report
+Agent -- default CLI --> short-lived code-deep command --+
+Agent -- optional MCP -> long-lived code-deep server -----+--> CodeGraphBridge
+                                                           +--> ReviewAnalyzer
+                                                           +--> shared projections
 ```
 
 The bridge ensures the requested Git repository or worktree index, lazily starts
-CodeGraph on the first tool call, reuses that connection for later calls, and
-reconnects once if the child exits during a tool request. CodeGraph may
-additionally share its own per-project daemon across MCP clients.
+CodeGraph on the first call, and reconnects once if the child exits during a
+request. A CLI command closes its bridge before exiting; the optional MCP server
+reuses its bridge for later calls. CodeGraph may additionally share its own
+per-project daemon across clients.
 
 ## Review semantics
 
@@ -209,10 +213,11 @@ report also exposes `ignoredPaths` for tool-generated files excluded from an imp
 working-tree review; caller-supplied diffs and Git ranges leave it empty. Each
 item represents one changed symbol and includes normalized impact symbols,
 related test files, mapping and impact confidence, parser warnings, and the exact
-reasons contributing to its per-symbol risk score. CLI JSON and library reports
-retain the complete structure; MCP responses use `schemaVersion: 3`, expose the
-selected `detailLevel`, and encode ranges, deltas, risks, symbols, and follow-up
-targets as compact strings. `omitted.reviewItems` appears only when needed.
+reasons contributing to its per-symbol risk score. The library and CLI
+`--detail full --json` retain the complete structure. Progressive CLI and MCP
+responses use `schemaVersion: 3`, expose the selected detail level, and encode
+ranges, deltas, risks, symbols, and follow-up targets as compact strings.
+`omitted.reviewItems` appears only when needed.
 
 ```ts
 const report = await codeDeep.review();

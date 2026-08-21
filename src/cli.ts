@@ -4,9 +4,15 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Command } from 'commander';
+import {
+  formatExploreOutput,
+  formatReviewOutput,
+  parseCliDetailLevel,
+  type CliDetailLevel,
+} from './cli-output.js';
 import { CodeDeepClient } from './client.js';
 import { CodeGraphBridge } from './codegraph-bridge.js';
-import { installCodeDeep, parseInstallTargets } from './installer.js';
+import { installCodeDeep, parseInstallMode, parseInstallTargets, type InstallMode } from './installer.js';
 import { createCodeDeepServer } from './mcp-server.js';
 import { initializeProjectIndex } from './project-index.js';
 import { collectProcessReport, renderProcessReport } from './process-report.js';
@@ -14,17 +20,19 @@ import { CODE_DEEP_VERSION } from './version.js';
 
 const program = new Command()
   .name('code-deep')
-  .description('Persistent CodeGraph MCP bridge for code exploration and review')
+  .description('Progressive code exploration and review, with optional MCP integration')
   .version(CODE_DEEP_VERSION);
 
 program
   .command('install')
-  .description('Install code-deep MCP and agent instructions')
+  .description('Install CLI-first agent instructions, with optional MCP integration')
   .requiredOption('--target <targets>', 'Comma-separated targets: codex,claude')
-  .action(async (options: { target: string }) => {
+  .option('--mode <mode>', 'Integration mode: cli or mcp', parseInstallMode, 'cli')
+  .action(async (options: { target: string; mode: InstallMode }) => {
     const result = await installCodeDeep({
       homeDir: homedir(),
       targets: parseInstallTargets(options.target),
+      mode: options.mode,
     });
     for (const file of result.files) {
       process.stdout.write(`${file.action.padEnd(9)} ${file.path}\n`);
@@ -76,12 +84,13 @@ program
   .description('Explore focused source, call paths, and blast radius')
   .option('-p, --path <path>', 'Project root', process.cwd())
   .option('--max-files <count>', 'Maximum source files', parsePositiveInteger, 12)
-  .action(async (query: string[], options: { path: string; maxFiles: number }) => {
+  .option('--detail <level>', 'Output detail: minimal, standard, or full', parseCliDetailLevel, 'minimal')
+  .action(async (query: string[], options: { path: string; maxFiles: number; detail: CliDetailLevel }) => {
     const projectPath = resolve(options.path);
     const client = new CodeDeepClient({ projectPath });
     try {
       const text = await client.explore(query.join(' '), { maxFiles: options.maxFiles });
-      process.stdout.write(`${text}\n`);
+      process.stdout.write(`${formatExploreOutput(text, options.detail)}\n`);
     } finally {
       await client.close();
     }
@@ -92,10 +101,11 @@ program
   .description('Build a risk-ordered review of the working tree or Git range')
   .option('--base <revision>', 'Git base revision')
   .option('--head <revision>', 'Git head revision; requires --base')
-  .option('--json', 'Print the structured JSON report')
+  .option('--detail <level>', 'Output detail: minimal, standard, or full', parseCliDetailLevel, 'minimal')
+  .option('--json', 'Print projected JSON; use --detail full for the complete report')
   .action(async (
     path = process.cwd(),
-    options: { base?: string; head?: string; json?: boolean },
+    options: { base?: string; head?: string; detail: CliDetailLevel; json?: boolean },
   ) => {
     const projectPath = resolve(path);
     const client = new CodeDeepClient({ projectPath });
@@ -104,9 +114,7 @@ program
         base: options.base,
         head: options.head,
       });
-      process.stdout.write(options.json
-        ? `${JSON.stringify(report, null, 2)}\n`
-        : `${report.markdown}\n`);
+      process.stdout.write(`${formatReviewOutput(report, options.detail, options.json ?? false)}\n`);
     } finally {
       await client.close();
     }
