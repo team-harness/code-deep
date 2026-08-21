@@ -97,9 +97,9 @@ describe('code-deep MCP server', () => {
       type: 'object',
       required: expect.arrayContaining([
         'schemaVersion', 'detailLevel', 'summary', 'files', 'reviewItems',
-        'reviewItemsOmitted', 'riskSignals', 'ignoredPaths',
       ]),
     });
+    expect(tools.tools[1]?.outputSchema?.properties?.schemaVersion).toMatchObject({ const: 3 });
     expect(tools.tools[1]?.outputSchema?.required).not.toContain('markdown');
     expect(tools.tools[1]?.outputSchema?.properties).not.toHaveProperty('impacts');
     expect(tools.tools[1]?.outputSchema?.properties).not.toHaveProperty('graphContext');
@@ -261,30 +261,35 @@ describe('code-deep MCP server', () => {
       detailLevel: string;
       reviewItems: Array<Record<string, unknown>>;
       files: Array<Record<string, unknown>>;
-      ignoredPaths: string[];
+      ignoredPaths?: string[];
     };
 
-    expect(structured.schemaVersion).toBe(2);
+    expect(structured.schemaVersion).toBe(3);
     expect(structured.detailLevel).toBe('minimal');
-    expect(structured.ignoredPaths).toEqual([]);
+    expect(structured.ignoredPaths).toBeUndefined();
     expect(structured.reviewItems).toEqual([
       expect.objectContaining({
-        id: 'src/auth.ts:login:1',
-        tests: expect.objectContaining({
-          status: 'linked',
-          relatedFiles: ['tests/auth.test.ts'],
-        }),
+        symbol: 'function login @ src/auth.ts:1',
+        tests: 'linked',
+        testFiles: ['tests/auth.test.ts'],
       }),
     ]);
     expect(structured).not.toHaveProperty('markdown');
     expect(structured).not.toHaveProperty('impacts');
     expect(structured).not.toHaveProperty('graphContext');
-    expect(structured).toHaveProperty('reviewItemsOmitted', 0);
+    expect(structured).not.toHaveProperty('omitted');
+    expect(structured.files[0]).not.toHaveProperty('graphConfidence');
+    expect(structured.files[0]).not.toHaveProperty('graphWarnings');
+    expect(structured.files[0]).not.toHaveProperty('omittedSymbols');
+    expect(structured.reviewItems[0]).not.toHaveProperty('mapping');
+    expect(structured.reviewItems[0]).not.toHaveProperty('impactConfidence');
+    expect(structured.reviewItems[0]).not.toHaveProperty('omittedTargets');
+    expect(structured.reviewItems[0]).not.toHaveProperty('omittedTestFiles');
     expect(structured.files[0]).not.toHaveProperty('patch');
     expect(structured.files[0]).not.toHaveProperty('graphSummary');
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'text',
-      text: expect.stringContaining('## Review priorities'),
+      text: expect.stringContaining('1. medium:30 login @ src/auth.ts:1'),
     }));
     expect(result.content).not.toContainEqual(expect.objectContaining({
       type: 'text',
@@ -332,14 +337,14 @@ describe('code-deep MCP server', () => {
     });
     const structured = result.structuredContent as {
       reviewItems: unknown[];
-      reviewItemsOmitted: number;
+      omitted?: { reviewItems?: number };
     };
 
     expect(structured.reviewItems).toHaveLength(3);
-    expect(structured.reviewItemsOmitted).toBe(2);
+    expect(structured.omitted?.reviewItems).toBe(2);
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'text',
-      text: expect.stringContaining('2 additional review items omitted'),
+      text: expect.stringContaining('2 omitted'),
     }));
   });
 
@@ -381,7 +386,7 @@ describe('code-deep MCP server', () => {
     expect(structured.detailLevel).toBe('standard');
     expect(structured).not.toHaveProperty('impacts');
     expect(structured).not.toHaveProperty('graphContext');
-    expect(structured).toHaveProperty('reviewItemsOmitted', 0);
+    expect(structured).not.toHaveProperty('omitted');
     expect(result.content).not.toContainEqual(expect.objectContaining({
       type: 'text',
       text: expect.stringContaining('## Diff'),
@@ -439,41 +444,34 @@ describe('code-deep MCP server', () => {
       },
     });
     const structured = result.structuredContent as {
-      summary: { symbolsAnalyzed: number };
+      summary: { scope: { symbols: string } };
       files: Array<{
-        symbols: unknown[];
-        symbolsOmitted: number;
+        symbols: string[];
+        omittedSymbols?: number;
       }>;
       reviewItems: Array<{
-        impact: {
-          affectedSymbols: unknown[];
-          affectedSymbolsOmitted: number;
-          testFiles: string[];
-          testFilesOmitted: number;
-        };
-        tests: {
-          relatedFiles: string[];
-          relatedFilesOmitted: number;
-        };
+        impact: number;
+        targets?: string[];
+        omittedTargets?: number;
+        testFiles?: string[];
+        omittedTestFiles?: number;
       }>;
-      reviewItemsOmitted: number;
+      omitted?: { reviewItems?: number };
     };
 
-    expect(structured.summary.symbolsAnalyzed).toBe(12);
+    expect(structured.summary.scope.symbols).toBe('12/12');
     expect(structured.files[0]?.symbols).toHaveLength(5);
-    expect(structured.files[0]?.symbolsOmitted).toBe(7);
+    expect(structured.files[0]?.omittedSymbols).toBe(7);
     expect(structured.reviewItems).toHaveLength(10);
-    expect(structured.reviewItemsOmitted).toBe(2);
-    expect(structured.reviewItems[0]?.impact.affectedSymbols).toHaveLength(3);
-    expect(structured.reviewItems[0]?.impact.affectedSymbolsOmitted).toBe(2);
-    expect(structured.reviewItems[0]?.impact.testFiles).toHaveLength(3);
-    expect(structured.reviewItems[0]?.impact.testFilesOmitted).toBe(2);
-    expect(structured.reviewItems[0]?.tests.relatedFiles).toHaveLength(3);
-    expect(structured.reviewItems[0]?.tests.relatedFilesOmitted).toBe(2);
+    expect(structured.omitted?.reviewItems).toBe(2);
+    expect(structured.reviewItems[0]?.impact).toBe(5);
+    expect(structured.reviewItems[0]).not.toHaveProperty('affectedSymbols');
+    expect(structured.reviewItems[0]).not.toHaveProperty('changedFiles');
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'text',
-      text: expect.stringContaining('2 additional review items omitted'),
+      text: expect.stringContaining('+7 priorities in structuredContent; 2 omitted'),
     }));
+    expect(JSON.stringify(structured).length).toBeLessThan(6_000);
   });
 
   it('compacts changed lines in MCP structured content', async () => {
@@ -511,13 +509,12 @@ describe('code-deep MCP server', () => {
     };
 
     expect(structured.files[0]).toMatchObject({
-      changedLineCount: 6,
-      changedLineRanges: [
-        { start: 1, end: 4 },
-        { start: 13, end: 14 },
-      ],
+      delta: '+6/-0',
+      lines: '1-4,13-14',
     });
     expect(structured.files[0]).not.toHaveProperty('changedLines');
+    expect(structured.files[0]).not.toHaveProperty('changedLineCount');
+    expect(structured.files[0]).not.toHaveProperty('changedLineRanges');
   });
 
   it('rejects a caller-supplied diff combined with a Git range', async () => {

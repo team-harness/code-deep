@@ -8,16 +8,18 @@ import {
 import { z } from 'zod';
 import { projectExploreText, type ExploreDetailLevel } from './explore-projection.js';
 import type { GraphReader, ReviewReport } from './review.js';
-import { renderReviewMarkdown, ReviewAnalyzer, validateReviewRequest } from './review.js';
+import { ReviewAnalyzer, validateReviewRequest } from './review.js';
+import {
+  projectReviewReport,
+  renderCompactReviewText,
+  type ReviewDetailLevel,
+} from './review-projection.js';
 import { ensureProjectIndex } from './project-index.js';
 import { CODE_DEEP_VERSION } from './version.js';
 
 const EXPLORE_MAX_FILES = { min: 1, max: 50, default: 12 } as const;
 const REVIEW_MAX_FILES = { min: 1, max: 100, default: 20 } as const;
 const REVIEW_MAX_SYMBOLS = { min: 1, max: 50, default: 12 } as const;
-const REVIEW_RESPONSE_ITEMS = { minimal: 3, standard: 10 } as const;
-const REVIEW_RESPONSE_NESTED_ITEMS = { minimal: 3, standard: 3 } as const;
-const REVIEW_RESPONSE_FILE_SYMBOLS = { minimal: 3, standard: 5 } as const;
 
 const ExploreInput = z.object({
   query: z.string().min(1),
@@ -91,7 +93,7 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
   type: 'object',
   description: 'Versioned review report. Read reviewItems in array order (highest risk first), then inspect warnings and truncation counters before making findings.',
   properties: {
-    schemaVersion: { type: 'number', const: 2 },
+    schemaVersion: { type: 'number', const: 3 },
     detailLevel: {
       type: 'string',
       enum: ['minimal', 'standard'],
@@ -99,51 +101,52 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
     },
     summary: {
       type: 'object',
-      description: 'Global diff totals and risk, including files/symbols omitted only from deep graph analysis.',
+      description: 'Compact risk and scope. files and symbols use analyzed/total notation; delta uses +N/-N.',
       properties: {
-        filesChanged: { type: 'number' },
-        filesAnalyzed: { type: 'number' },
-        filesOmitted: { type: 'number' },
-        symbolsMapped: { type: 'number' },
-        symbolsAnalyzed: { type: 'number' },
-        symbolsOmitted: { type: 'number' },
-        riskScore: { type: 'number' },
-        riskLevel: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        risk: { type: 'string', description: 'Risk level and score as level:N.' },
+        scope: {
+          type: 'object',
+          properties: {
+            files: { type: 'string', description: 'Analyzed/changed files.' },
+            symbols: { type: 'string', description: 'Analyzed/mapped symbols.' },
+            delta: { type: 'string', description: 'Added/deleted lines as +N/-N.' },
+          },
+          required: ['files', 'symbols', 'delta'],
+          additionalProperties: false,
+        },
       },
-      required: [
-        'filesChanged', 'filesAnalyzed', 'filesOmitted',
-        'symbolsMapped', 'symbolsAnalyzed', 'symbolsOmitted',
-        'riskScore', 'riskLevel',
-      ],
-      additionalProperties: true,
+      required: ['risk', 'scope'],
+      additionalProperties: false,
     },
     reviewItems: {
       type: 'array',
-      description: 'Changed symbols sorted by descending risk. Minimal returns the top three and standard returns the top ten; reviewItemsOmitted reports the remainder.',
+      description: 'Changed symbols sorted by descending risk. Minimal returns the top three and standard returns the top ten; omitted.reviewItems is present only when more remain.',
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string' },
-          file: { type: 'string' },
-          mappingConfidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-          symbol: { type: 'object' },
-          impact: {
-            type: 'object',
-            description: 'Compact impact evidence. affectedSymbols and testFiles are capped at three; matching *Omitted counters report projection truncation.',
-          },
-          tests: {
-            type: 'object',
-            description: 'Compact test evidence. status is linked, changed, missing, or unknown; file arrays are capped at three with matching *Omitted counters.',
-          },
-          risk: { type: 'object' },
+          symbol: { type: 'string', description: 'kind name @ file:line.' },
+          risk: { type: 'string', description: 'Risk level and score as level:N.' },
+          mapping: { type: 'string', enum: ['medium', 'low'], description: 'Omitted when high.' },
+          impact: { type: 'number', description: 'Total affected symbols.' },
+          impactConfidence: { type: 'string', enum: ['medium', 'low'], description: 'Omitted when high.' },
+          tests: { type: 'string', enum: ['linked', 'changed', 'missing', 'unknown'] },
+          reasons: { type: 'array', items: { type: 'string' }, description: 'Risk reason and score as code:+N.' },
+          targets: { type: 'array', items: { type: 'string' }, description: 'Up to three non-test follow-up targets as file:symbol:line.' },
+          omittedTargets: { type: 'number' },
+          testFiles: { type: 'array', items: { type: 'string' } },
+          omittedTestFiles: { type: 'number' },
+          warnings: { type: 'array', items: { type: 'string' } },
         },
-        required: ['id', 'file', 'symbol', 'mappingConfidence', 'impact', 'tests', 'risk'],
-        additionalProperties: true,
+        required: ['symbol', 'risk', 'impact', 'tests'],
+        additionalProperties: false,
       },
     },
-    reviewItemsOmitted: {
-      type: 'number',
-      description: 'Review items omitted only from this response projection. Analysis coverage remains available in summary.symbolsAnalyzed.',
+    omitted: {
+      type: 'object',
+      description: 'Present only when response projection omits review items.',
+      properties: { reviewItems: { type: 'number' } },
+      required: ['reviewItems'],
+      additionalProperties: false,
     },
     files: {
       type: 'array',
@@ -151,38 +154,27 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
       items: {
         type: 'object',
         properties: {
-          changedLineCount: { type: 'number' },
+          path: { type: 'string' },
+          status: { type: 'string', enum: ['A', 'D', 'M', 'R'] },
+          delta: { type: 'string', description: 'Added/deleted lines as +N/-N.' },
+          lines: { type: 'string', description: 'Inclusive ranges such as 42,45,51-57.' },
           symbols: {
             type: 'array',
-            description: 'Mapped changed symbols, capped at three for minimal and five for standard.',
-            items: { type: 'object' },
+            description: 'Mapped symbols as kind name:line, capped at three for minimal and five for standard.',
+            items: { type: 'string' },
           },
-          symbolsOmitted: {
-            type: 'number',
-            description: 'Mapped symbols omitted from this file projection.',
-          },
-          changedLineRanges: {
-            type: 'array',
-            description: 'Inclusive changed-line ranges sorted by start line.',
-            items: {
-              type: 'object',
-              properties: {
-                start: { type: 'number' },
-                end: { type: 'number' },
-              },
-              required: ['start', 'end'],
-              additionalProperties: false,
-            },
-          },
+          omittedSymbols: { type: 'number' },
+          graphConfidence: { type: 'string', enum: ['medium', 'low'], description: 'Omitted when high.' },
+          graphWarnings: { type: 'array', items: { type: 'string' } },
         },
-        required: ['symbols', 'symbolsOmitted', 'changedLineCount', 'changedLineRanges'],
-        additionalProperties: true,
+        required: ['path', 'status', 'delta'],
+        additionalProperties: false,
       },
     },
-    riskSignals: {
+    signals: {
       type: 'array',
-      description: 'Explainable global risk contributions, including truncation and incomplete graph analysis.',
-      items: { type: 'object' },
+      description: 'Global risk contributions as code:+N.',
+      items: { type: 'string' },
     },
     ignoredPaths: {
       type: 'array',
@@ -192,9 +184,8 @@ const REVIEW_OUTPUT_SCHEMA: NonNullable<Tool['outputSchema']> = {
   },
   required: [
     'schemaVersion', 'detailLevel', 'summary', 'files', 'reviewItems',
-    'reviewItemsOmitted', 'riskSignals', 'ignoredPaths',
   ],
-  additionalProperties: true,
+  additionalProperties: false,
 };
 
 const TOOLS: Tool[] = [
@@ -320,82 +311,15 @@ function exploreResult(
 
 function reportResult(
   report: ReviewReport,
-  detailLevel: 'minimal' | 'standard',
+  detailLevel: ReviewDetailLevel,
 ): CallToolResult {
-  const reviewItemLimit = REVIEW_RESPONSE_ITEMS[detailLevel];
-  const nestedItemLimit = REVIEW_RESPONSE_NESTED_ITEMS[detailLevel];
-  const fileSymbolLimit = REVIEW_RESPONSE_FILE_SYMBOLS[detailLevel];
-  const structuredContent = {
-    schemaVersion: 2,
-    detailLevel,
-    summary: report.summary,
-    files: report.files.map(({
-    changedLines,
-    patch: _patch,
-    graphSummary: _graphSummary,
-    symbols,
-    ...file
-  }) => ({
-    ...file,
-    symbols: symbols.slice(0, fileSymbolLimit),
-    symbolsOmitted: Math.max(0, symbols.length - fileSymbolLimit),
-    changedLineCount: changedLines.length,
-    changedLineRanges: compactLineRanges(changedLines),
-    })),
-    reviewItems: report.reviewItems
-      .slice(0, reviewItemLimit)
-      .map((item) => projectReviewItem(item, nestedItemLimit)),
-    reviewItemsOmitted: Math.max(0, report.reviewItems.length - reviewItemLimit),
-    riskSignals: report.riskSignals,
-    ignoredPaths: report.ignoredPaths,
-  };
   return {
     content: [{
       type: 'text',
-      text: renderReviewMarkdown(report, {
-        detailLevel,
-        maxItems: reviewItemLimit,
-        includeExtendedSections: false,
-      }),
+      text: renderCompactReviewText(report, detailLevel),
     }],
-    structuredContent,
+    structuredContent: projectReviewReport(report, detailLevel),
   };
-}
-
-function projectReviewItem(
-  item: ReviewReport['reviewItems'][number],
-  limit: number,
-): Record<string, unknown> {
-  return {
-    ...item,
-    impact: {
-      ...item.impact,
-      affectedSymbols: item.impact.affectedSymbols.slice(0, limit),
-      affectedSymbolsOmitted: Math.max(0, item.impact.affectedSymbols.length - limit),
-      testFiles: item.impact.testFiles.slice(0, limit),
-      testFilesOmitted: Math.max(0, item.impact.testFiles.length - limit),
-    },
-    tests: {
-      ...item.tests,
-      relatedFiles: item.tests.relatedFiles.slice(0, limit),
-      relatedFilesOmitted: Math.max(0, item.tests.relatedFiles.length - limit),
-      changedFiles: item.tests.changedFiles.slice(0, limit),
-      changedFilesOmitted: Math.max(0, item.tests.changedFiles.length - limit),
-    },
-  };
-}
-
-function compactLineRanges(lines: number[]): Array<{ start: number; end: number }> {
-  const ranges: Array<{ start: number; end: number }> = [];
-  for (const line of lines) {
-    const current = ranges.at(-1);
-    if (current && line <= current.end + 1) {
-      current.end = Math.max(current.end, line);
-    } else {
-      ranges.push({ start: line, end: line });
-    }
-  }
-  return ranges;
 }
 
 function errorResult(message: string): CallToolResult {

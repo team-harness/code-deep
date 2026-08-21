@@ -172,7 +172,7 @@ flowchart TD
 - 变更行映射到同文件中最近的前置符号；`mappingConfidence` 表达这种启发式映射的可靠度。
 - `CodeGraphAdapter` 分别调用 `codegraph_node`、`codegraph_impact` 和 `codegraph_explore`。影响结果中的测试文件用于生成 `linked`、`changed`、`missing` 或 `unknown` 测试状态。
 - review item 按风险降序排列；整体分数取全局信号总分与最高 review item 分数的较大值，避免局部高风险被较低的聚合分数掩盖。逐符号风险只在 impact 解析为 `high` 且符号映射不为 `low` 时加入 `cross-boundary-impact`：边界保守识别为 workspace root 下的 package/app/service/module/lib，或 `src/` 下第一层领域。当前后端没有结构化关键流程证据，因此不从展示文本推断 `critical-flow`。
-- 同一个核心 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown；CLI 通过 `--json` 选择输出。MCP 投影使用独立的 `schemaVersion: 2`，按 `detailLevel` 投影该报告：默认 `minimal` 只返回摘要、风险信号、紧凑行范围和前三个 review item，并通过 `reviewItemsOmitted` 显式报告响应层截断；显式 `standard` 才返回完整的有界 Diff、影响兼容视图与图上下文。
+- 同一个核心 `ReviewReport` 同时承载版本化结构与由该结构渲染的 Markdown；CLI 通过 `--json` 选择输出。MCP 投影使用独立的 `schemaVersion: 3`：`minimal` 返回前三个 review item，`standard` 返回前十个；两者都不嵌入 Diff、原始 impact 或 graph context。行范围、增删、风险、符号和续查目标使用紧凑字符串；空数组、零省略计数和默认高置信度字段不输出，只有发生响应层截断时才出现 `omitted.reviewItems`。
 
 ### 安装与进程诊断
 

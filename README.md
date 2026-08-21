@@ -131,10 +131,13 @@ unified `diff`. These modes are mutually exclusive, and `head` always requires
 It defaults to `detailLevel: "minimal"`, returning the risk summary, signals,
 compact changed-line ranges, and the top three review items without embedding
 the diff or graph context. `detailLevel: "standard"` returns the top ten review
-items. Both levels cap nested symbol, impact, and test lists and expose explicit
-omission counters. Use targeted `explore` calls to retrieve source and call-path
-context for the highest-risk symbols instead of loading the complete review into
-the agent context.
+items. The MCP-only schema uses compact agent-readable strings: line ranges such
+as `42,45,51-57`, deltas such as `+9/-5`, and risks such as `wide-impact:+12`.
+Empty arrays, zero omission counters, and default high-confidence fields are not
+emitted. Both levels cap follow-up targets and linked test files and expose
+omission counts only when needed. Use targeted `explore` calls to retrieve source
+and call-path context for the highest-risk symbols instead of loading the complete
+review into the agent context. CLI JSON remains the full library report.
 
 Review input limits are explicit: `maxFiles` is an integer from `1` to `100`
 (default `20`) and bounds deep file, symbol, patch, and graph analysis;
@@ -144,7 +147,7 @@ parameter truncates the complete-diff totals or global risk signals, so use them
 to control analysis breadth rather than response size. Response projection limits
 are independent: for example, `maxSymbols: 50` can analyze 50 symbols while
 `detailLevel: "standard"` returns only the top ten and reports the other 40 in
-`reviewItemsOmitted`.
+`omitted.reviewItems`.
 
 Other review inputs are explicit as well: `projectPath` is the absolute Git root
 and defaults to the server project; choose one source mode (current working tree,
@@ -207,8 +210,9 @@ working-tree review; caller-supplied diffs and Git ranges leave it empty. Each
 item represents one changed symbol and includes normalized impact symbols,
 related test files, mapping and impact confidence, parser warnings, and the exact
 reasons contributing to its per-symbol risk score. CLI JSON and library reports
-retain the complete structure; MCP responses use `schemaVersion: 2`, expose the
-selected `detailLevel` and `reviewItemsOmitted`, and use compact changed-line ranges.
+retain the complete structure; MCP responses use `schemaVersion: 3`, expose the
+selected `detailLevel`, and encode ranges, deltas, risks, symbols, and follow-up
+targets as compact strings. `omitted.reviewItems` appears only when needed.
 
 ```ts
 const report = await codeDeep.review();
